@@ -1,0 +1,1 @@
+### Scripts related database seeding, migrations or elastic search reindexing will be written here

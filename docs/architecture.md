@@ -107,7 +107,7 @@ Upload → Queue → Worker → Index
 3. A worker extracts, processes, and enriches text
 4. Pages are indexed into Elasticsearch
 
-📎 *See:* [`upload-sequence`](https://github.com/alap-parate/docsense/blob/main/upload-sequence.md) diagram
+📎 *See:* [`upload-sequence`](https://github.com/alap-parate/docsense/blob/main/docs/diagrams/upload-sequence.md) diagram
 
 ---
 
@@ -122,7 +122,7 @@ DocSense is **page-first**, not document-first.
 
 Search acts as **navigation**, not just discovery.
 
-📎 *See:* [`search-sequence`](https://github.com/alap-parate/docsense/blob/main/search-sequence.md) diagram
+📎 *See:* [`search-sequence`](https://github.com/alap-parate/docsense/blob/main/docs/diagrams/search-sequence.md) diagram
 
 ---
 
