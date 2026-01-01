@@ -118,6 +118,7 @@ The system has four parts :
 
 ## Register
 > POST /auth/register
+
 **Request**
 ```json
 {
@@ -139,6 +140,7 @@ The system has four parts :
 
 ## Refresh Token
 > POST /auth/refresh
+
 **Request**
 ```json
 {
@@ -156,6 +158,7 @@ The system has four parts :
 ```
 ## List active Sessions
 > GET /auth/sessions
+
 **Response**
 ```json
 {
@@ -180,6 +183,7 @@ The system has four parts :
 
 ## Revoke a specific Session
 > DELETE /auth/sessions/:sessionId
+
 **Response**
 ```json
 {
@@ -193,6 +197,7 @@ The system has four parts :
 
 ## Revoke All Sessions
 > DELETE /auth/sessions
+
 **Response**
 ```json
 {
@@ -204,6 +209,7 @@ The system has four parts :
 
 ## Get Logged in User
 > GET /auth/me
+
 **Response**
 ```json
 {
@@ -218,6 +224,7 @@ The system has four parts :
 
 ## Edit Logged in User
 > PATCH /auth/me
+
 **Request**
 ```json
 {
@@ -238,6 +245,7 @@ The system has four parts :
 
 ## Change Password
 > POST /auth/change-password
+
 **Request**
 ```json
 {
@@ -256,6 +264,7 @@ The system has four parts :
 
 ## Forgot Password
 > POST /auth/forgot-password
+
 **Request**
 ```json
 {
@@ -274,6 +283,7 @@ The system has four parts :
 
 ## Reset Password
 > POST /auth/reset-password
+
 **Request**
 ```json
 {
@@ -292,6 +302,7 @@ The system has four parts :
 
 ## Rotate Email
 > POST /auth/change-email
+
 **Request**
 ```json
 {
@@ -310,6 +321,7 @@ The system has four parts :
 
 ## Verify Mail Rotation
 > POST /auth/verify-email-change
+
 **Request**
 ```json
 {
@@ -330,6 +342,7 @@ The system has four parts :
 
 ## Create Folder
 > POST /folders
+
 **Request**
 ```json
 {
@@ -349,6 +362,7 @@ The system has four parts :
 
 ## List Folders (Tree Friendly)
 > GET /folders?parentId=<uuid|null>
+
 **Response**
 ```json
 {
@@ -370,6 +384,7 @@ The system has four parts :
 
 ## Get Folder Details
 > GET /folders/:folderId
+
 **Response**
 ```json
 {
@@ -391,6 +406,7 @@ The system has four parts :
 
 ## Rename Folder
 > PATCH /folders/:folderId
+
 **Request**
 ```json
 {
@@ -411,6 +427,7 @@ The system has four parts :
 
 ## Move Folder(s) to a Destination Folder
 > POST /folders/move
+
 **Request**
 ```json
 {
@@ -453,6 +470,7 @@ The system has four parts :
 
 ## Delete Folder(s) (soft delete) - basically moves to recycle bin
 > POST /folders/delete
+
 **Request**
 ```json
 {
@@ -490,6 +508,7 @@ The system has four parts :
 ## Recycle Bin
 ## List recycled items
 > GET /recycle-bin
+
 **Response**
 ```json
 {
@@ -516,6 +535,7 @@ The system has four parts :
 
 ## Restore Folder
 > POST /recycle-bin/restore
+
 **Request**
 ```json
 {
@@ -563,6 +583,7 @@ The system has four parts :
 
 ## Permanent Delete
 > DELETE /recycle-bin/permanent
+
 **Request**
 ```json
 {
@@ -590,6 +611,7 @@ The system has four parts :
 
 ## File Upload (Request a presigned url and upload to it)
 > POST /files/upload-request
+
 **Request**
 ```json
 {
@@ -611,6 +633,7 @@ The system has four parts :
 
 ## List Files
 > GET /files?folderId=<uuid>
+
 **Response**
 ```json
 {
@@ -628,6 +651,7 @@ The system has four parts :
 
 ## Move Files
 > POST /files/move
+
 **Request**
 ```json
 {
@@ -672,6 +696,7 @@ The system has four parts :
 
 ## File Detail
 > GET /files/:fileId
+
 **Response**
 ```json
 {
@@ -710,6 +735,7 @@ The system has four parts :
 
 ## Delete File(s) (soft delete) - basically moves to recycle bin
 > POST /files/delete
+
 **Request**
 ```json
 {
@@ -755,6 +781,7 @@ The system has four parts :
 
 ## Trigger Processing
 > POST /files/:fileId/process
+
 **Response**
 ```json
 {
@@ -767,6 +794,7 @@ The system has four parts :
 
 ## Job Status
 > GET /jobs/:jobId
+
 **Response**
 ```json
 {
@@ -781,6 +809,7 @@ The system has four parts :
 
 ## Search Documents
 > POST /search
+
 **Request**
 ```json
 {
