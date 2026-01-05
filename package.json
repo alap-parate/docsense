@@ -1,0 +1,28 @@
+{
+  "name": "docsense",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DocSense is a document intelligence platform that allows users to upload PDFs and perform page-level full-text search with immediate context rendering.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky install"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alap-parate/docsense.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alap-parate/docsense/issues"
+  },
+  "homepage": "https://github.com/alap-parate/docsense#readme",
+  "devDependencies": {
+    "husky": "^8.0.0"
+  }
+}

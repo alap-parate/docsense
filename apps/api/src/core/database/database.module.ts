@@ -1,4 +1,13 @@
-import { Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import  { typeOrmConfig}  from './typeorm.config';
 
-@Module({})
+@Global()
+@Module({
+    imports: [
+        TypeOrmModule.forRootAsync({
+            useFactory: typeOrmConfig
+        }),
+    ]
+})
 export class DatabaseModule {}

@@ -10,6 +10,7 @@ import { FilesModule } from './modules/files/files.module';
 import { TenantsModule } from './modules/tenants/tenants.module';
 import { FoldersModule } from './modules/folders/folders.module';
 import { HealthModule } from './core/health/health.module';
+import { DemoModule } from './modules/demo/demo.module';
 
 @Module({
   imports: [
@@ -22,7 +23,9 @@ import { HealthModule } from './core/health/health.module';
     UsersModule, 
     FilesModule, 
     TenantsModule, 
-    FoldersModule, HealthModule
+    FoldersModule, 
+    HealthModule, 
+    DemoModule
   ],
 })
 export class AppModule {}
