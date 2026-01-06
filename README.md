@@ -1,4 +1,9 @@
-# DocSense
+<p align="center">
+  <img align="center" src="https://github.com/alap-parate/docsense/blob/main/docs/logo.png" width="500" alt="accessibility text">
+</p>
+<h1 align="center" >
+  Docsense
+</h1>
 
 DocSense is a document intelligence platform that allows users to upload PDFs
 and perform page-level full-text search with immediate context rendering.
