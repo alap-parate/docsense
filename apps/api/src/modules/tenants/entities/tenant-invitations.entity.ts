@@ -1,16 +1,11 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
-import { Entity, Column, JoinColumn, ManyToOne } from "typeorm";
+import { Entity, Column, JoinColumn, ManyToOne, Unique } from "typeorm";
 import { Users } from "src/modules/users/entities/users.entity";
 import { Tenants } from "./tenants.entity";
-import { TenantRole } from "./tenant-users.entity";
+import { InvitationStatus } from "../constants/invitation-status.enum";
+import { TenantRole } from "../constants/tenant-role.enum";
 
-export enum InvitationStatus {
-    PENDING = 'PENDING',
-    ACCEPTED = 'ACCEPTED',
-    EXPIRED = 'EXPIRED',
-    REVOKED = 'REVOKED'
-}
-
+@Unique(['tenantId', 'email'])
 @Entity({
     name: 'tenant_invitations'
 })
@@ -18,13 +13,15 @@ export class TenantInvitations extends BaseEntity {
 
     @Column({ 
         name: 'tenant_id',
-        type: 'uuid'
+        type: 'uuid',
+        unique: true
     })
     tenantId!: string;
 
     @Column({ 
         name: 'email',
-        type: 'varchar'
+        type: 'varchar',
+        unique: true
     })
     email!: string;
 
@@ -38,7 +35,8 @@ export class TenantInvitations extends BaseEntity {
 
     @Column({ 
         name: 'token_hash',
-        type: 'text'
+        type: 'text',
+        unique: true
     })
     tokenHash!: string;
 

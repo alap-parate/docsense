@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from './core/config/config.module';
 import { AuthModule } from './core/auth/auth.module';
 import { DatabaseModule } from './core/database/database.module';
@@ -9,6 +9,9 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { StorageModule } from './modules/storage/storage.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { ProcessingModule } from './modules/processing/processing.module';
+import { DemoModule } from './modules/demo/demo.module';
+import { RequestIdMiddleware } from './shared/middleware/requestId.middleware';
 
 @Module({
   imports: [
@@ -20,7 +23,9 @@ import { AuditModule } from './modules/audit/audit.module';
     HealthModule, 
     NotificationsModule, 
     StorageModule, 
-    DocumentsModule, AuditModule, 
+    DocumentsModule, 
+    AuditModule, 
+    ProcessingModule, DemoModule, 
   ],
 })
 export class AppModule {}

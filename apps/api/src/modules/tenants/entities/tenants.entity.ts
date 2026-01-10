@@ -1,11 +1,7 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
 import { Entity, Column, JoinColumn, ManyToOne } from "typeorm";
 import { Users } from "src/modules/users/entities/users.entity";
-
-export enum TenantStatus {
-    ACTIVE = 'ACTIVE',
-    SUSPENDED = 'SUSPENDED'
-}
+import { TenantStatus } from "../constants/tenant-status.enum";
 
 @Entity({
     name: 'tenants'
