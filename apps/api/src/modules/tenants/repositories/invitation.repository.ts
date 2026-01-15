@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, InsertResult } from "typeorm";
+import { Repository, InsertResult, EntityManager } from "typeorm";
 import { TenantInvitations } from "../entities/tenant-invitations.entity";
 import { TenantRole } from "../constants/tenant-role.enum";
 import { InvitationStatus } from "../constants/invitation-status.enum";
@@ -13,37 +13,49 @@ export class InvitationRepository {
     ) { }
 
     async inviteUser(
-        userId: string,
+        inviterUserId: string,
+        targetUserId: string,
         tenantId: string,
         email: string,
         role: TenantRole,
         tokenHash: string,
         expiresAt: Date,
-    ): Promise<InsertResult | null> {
-        return this.tenantInvRepo.upsert({
-            tenantId: tenantId,
-            email: email,
-            role: role,
-            tokenHash: tokenHash,
-            status: InvitationStatus.PENDING,
-            expiresAt: expiresAt,
-            invitedAt: () => 'CURRENT_TIMESTAMP',
-            createdById: userId,
-        }, ['email', 'tenantId']);
+    ): Promise<TenantInvitations> {
+        const result = await this.tenantInvRepo
+            .createQueryBuilder()
+            .insert()
+            .into(TenantInvitations)
+            .values({
+                tenantId,
+                email,
+                userId: targetUserId,
+                role,
+                tokenHash,
+                status: InvitationStatus.PENDING,
+                expiresAt,
+                createdById: inviterUserId,
+            })
+            .returning('*')
+            .execute();
+
+        return result.raw[0];
+
     };
 
     async acceptInvitation(
         Invid: string,
-        userId: string
-    ): Promise<boolean> {
-        const result = await this.tenantInvRepo.update(
+        userId: string,
+        manager?: EntityManager
+    ): Promise<InvitationRepository> {
+        const repo = manager ? manager.getRepository(TenantInvitations) : this.tenantInvRepo;
+        const result = await repo.update(
             { id: Invid }, {
-                status: InvitationStatus.ACCEPTED,
-                acceptedById: userId,
-                updatedById: userId,
-            }
+            status: InvitationStatus.ACCEPTED,
+            acceptedById: userId,
+            updatedById: userId,
+        },
         )
-        return result.affected === 1 
+        return result.raw[0]
     }
 
     async findInvitationByHash(hash: string): Promise<TenantInvitations | null> {
@@ -53,6 +65,7 @@ export class InvitationRepository {
                 id: true,
                 tenantId: true,
                 email: true,
+                userId: true,
                 role: true,
                 tokenHash: true,
                 status: true,
@@ -61,13 +74,14 @@ export class InvitationRepository {
         });
     };
 
-    async revokeInvitation(id: string): Promise<boolean> {
+    async revokeInvitation(id: string, userId: string): Promise<TenantInvitations> {
         const result = await this.tenantInvRepo.update(
             { id }, {
-                status: InvitationStatus.REVOKED,
-            }
+            status: InvitationStatus.REVOKED,
+            updatedById: userId
+        }
         );
-        return result.affected === 1;
+        return result.raw[0];
     };
 
     async listInvitationByTenant(
@@ -81,16 +95,54 @@ export class InvitationRepository {
             },
             select: {
                 id: true,
+                email: true,
                 createdBy: {
                     id: true,
                     email: true,
                 }
             },
             order: {
-                invitedAt:"DESC"
+                invitedAt: "DESC"
             },
             skip: (page - 1 * limit),
             take: limit,
         })
+    }
+
+    async findInvite(
+        userId: string,
+        tenantId: string
+    ): Promise<TenantInvitations | null> {
+        const result = await this.tenantInvRepo.find({
+            where: {
+                userId: userId,
+                tenantId: tenantId,
+                status: InvitationStatus.PENDING
+            },
+            take: 1,
+            order: {
+                expiresAt: 'DESC'
+            }
+        })
+        return result[0];
+    }
+
+    async findInviteById(
+        id: string,
+    ): Promise<TenantInvitations | null> {
+        return await this.tenantInvRepo.findOne({
+            where: { id },
+        })
+    }
+
+    async expireToken(
+        tokenHash: string
+    ): Promise<TenantInvitations> {
+        const result = await this.tenantInvRepo.update({
+            tokenHash: tokenHash
+        }, {
+            status: InvitationStatus.EXPIRED
+        })
+        return result.raw[0]
     }
 };

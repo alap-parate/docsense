@@ -4,8 +4,9 @@ import { Users } from "src/modules/users/entities/users.entity";
 import { Tenants } from "./tenants.entity";
 import { InvitationStatus } from "../constants/invitation-status.enum";
 import { TenantRole } from "../constants/tenant-role.enum";
+import Joi from "joi";
 
-@Unique(['tenantId', 'email'])
+@Unique(['tenantId', 'userId'])
 @Entity({
     name: 'tenant_invitations'
 })
@@ -24,6 +25,12 @@ export class TenantInvitations extends BaseEntity {
         unique: true
     })
     email!: string;
+
+    @Column({
+        name: 'user_id',
+        type: 'uuid',
+    })
+    userId!: string;
 
     @Column({ 
         name: 'role',
@@ -97,4 +104,9 @@ export class TenantInvitations extends BaseEntity {
     @ManyToOne(() => Users, user => user.id, { nullable: false })
     @JoinColumn({ name: 'updated_by' })
     updatedBy?: Users;
+
+    @ManyToOne(() => Users, user => user.id, { nullable: false })
+    @JoinColumn({ name: 'user_id' })
+    user?: Users;
+
 }

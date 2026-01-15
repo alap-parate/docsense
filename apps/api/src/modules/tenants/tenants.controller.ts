@@ -12,6 +12,11 @@ import { TenantListUserRequestDto, TenantListUserResponseDto } from './dto/list-
 import { RenameTenantDto, TenantIdParamDto } from './dto/rename-tenant.dto';
 import { RemoveTenantUserParamDto, RemoveTenantUserResponseDto } from './dto/remove-user.dto';
 import { ChangeRoleUserParamDto, ChangeRoleUserResponseDto, ChangeRoleUserBodyDto } from './dto/change-role.dto';
+import { InviteUserDtoRequestBody, InviteUserResponseDto } from './dto/invite-user.dto';
+import { authPlugins } from 'mysql2';
+import { InvitationService } from './services/invitation.service';
+import { AcceptInviteParamDto, AcceptInviteResponseDto } from './dto/accept-invite-user.dto';
+import { RevokeInviteParamDto } from './dto/revoke-invite-token';
 
 @Controller({
     version: '1',
@@ -22,6 +27,7 @@ export class TenantsController {
 
     constructor(
         private readonly tenantService: TenantService,
+        private readonly inviteService: InvitationService
     ) {}
 
     @Post()
@@ -136,6 +142,45 @@ export class TenantsController {
             excludeExtraneousValues: true
         })
         return response
+    }
+
+    @Post('invite')
+    @HttpCode(HttpStatus.OK)
+    async inviteUser(
+        @CurrentUser() user: AuthUser,
+        @Body() dto: InviteUserDtoRequestBody
+    ) {
+       const response = await this.inviteService.invite(dto.email, dto.tenantId, dto.role, user.id)
+       const data = plainToInstance(InviteUserResponseDto, response, {
+        excludeExtraneousValues: true
+       })
+       return data
+    }
+
+    @Post('/invite/accept/:token')
+    @HttpCode(HttpStatus.OK)
+    async acceptInvite(
+        @CurrentUser() user:AuthUser,
+        @Param() params: AcceptInviteParamDto
+    ) {
+        const response = await this.inviteService.acceptInvite(params.token);
+        const data = plainToInstance(AcceptInviteResponseDto, response, {
+            excludeExtraneousValues: true
+        })
+        return data;
+    }
+
+    @Post('/invite/revoke/:id')
+    @HttpCode(HttpStatus.OK)
+    async revokeInvite(
+        @CurrentUser() user:AuthUser,
+        @Param() params: RevokeInviteParamDto
+    ) {
+        const response = await this.inviteService.revokeInvitation(params.id, user.id);
+        const data = plainToInstance(RevokeInviteParamDto, response, {
+            excludeExtraneousValues: true
+        })
+        return data;
     }
 
 }

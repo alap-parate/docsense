@@ -22,7 +22,6 @@ export class TenantService {
                     createdByUserId,
                     TenantRole.OWNER,
                     MembershipStatus.ACTIVE,
-                    manager 
                 )
         })
         return tenant;
