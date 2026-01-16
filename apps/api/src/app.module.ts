@@ -11,7 +11,6 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { ProcessingModule } from './modules/processing/processing.module';
 import { DemoModule } from './modules/demo/demo.module';
-import { RequestIdMiddleware } from './shared/middleware/requestId.middleware';
 
 @Module({
   imports: [
@@ -27,5 +26,6 @@ import { RequestIdMiddleware } from './shared/middleware/requestId.middleware';
     AuditModule, 
     ProcessingModule, DemoModule, 
   ],
+  providers: [],
 })
 export class AppModule {}

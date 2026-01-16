@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { TenantRepository } from '../repositories/tenant.repository';
 import { DataSource } from 'typeorm';
+import { randomUUID } from 'crypto';
+import { Folders } from 'src/modules/storage/entities/folder.entity';
 import { TenantRole } from '../constants/tenant-role.enum';
 import { MembershipStatus } from '../constants/membership-status.enum';
 
@@ -23,6 +25,18 @@ export class TenantService {
                     TenantRole.OWNER,
                     MembershipStatus.ACTIVE,
                 )
+
+            const rootId = randomUUID();
+            await manager.getRepository(Folders).insert({
+                id: rootId,
+                tenantId: tenant.id,
+                parentId: null,
+                name: "root",
+                path: rootId.replace(/-/g, ""),
+                createdById: createdByUserId,
+                updatedById: createdByUserId,
+                deletedById: null,
+            });
         })
         return tenant;
     }

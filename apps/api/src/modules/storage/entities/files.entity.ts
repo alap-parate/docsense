@@ -1,10 +1,11 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
-import { Entity, Column, ManyToOne, JoinColumn } from "typeorm";
+import { Entity, Column, ManyToOne, JoinColumn, Index } from "typeorm";
 import { Users } from "src/modules/users/entities/users.entity";
 import { Tenants } from "src/modules/tenants/entities/tenants.entity";
 import { Folders } from "./folder.entity";
 
 export enum FileStatus {
+    UPLOAD_PENDING = 'UPLOAD_PENDING',
     UPLOADED = 'UPLOADED',
     PROCESSING = 'PROCESSING',
     READY = 'READY',
@@ -14,6 +15,8 @@ export enum FileStatus {
 @Entity({
     name: 'files'
 })
+@Index(['tenantId', 'folderId'])
+@Index(['tenantId', 'folderId', 'name'], { unique: true })
 export class Files extends BaseEntity {
     
     @Column({
@@ -62,7 +65,7 @@ export class Files extends BaseEntity {
         name: 'status',
         type: 'enum',
         enum: FileStatus,
-        default: FileStatus.UPLOADED
+        default: FileStatus.UPLOAD_PENDING
     })
     status!: FileStatus;
 
@@ -74,17 +77,18 @@ export class Files extends BaseEntity {
 
     @Column({
         name: 'deleted_by',
-        type: 'uuid'
+        type: 'uuid',
+        nullable: true
     })
-    deletedById!: string;
+    deletedById!: string | null;
     
     @ManyToOne(() => Users, user => user.id, { nullable: false })
     @JoinColumn({ name: 'uploaded_by' })
     uploadedBy!: Users
 
-    @ManyToOne(() => Users, user => user.id, { nullable: false })
+    @ManyToOne(() => Users, user => user.id, { nullable: true })
     @JoinColumn({ name: 'deleted_by' })
-    deletedBy!: Users
+    deletedBy!: Users | null
 
     @ManyToOne(() => Tenants, tenant => tenant.id, { nullable: false })
     @JoinColumn({ name: 'tenant_id' })

@@ -1,11 +1,13 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
-import { Entity, Column, ManyToOne, JoinColumn, JoinTable, OneToMany } from "typeorm";
+import { Entity, Column, ManyToOne, JoinColumn, OneToMany, Index } from "typeorm";
 import { Users } from "src/modules/users/entities/users.entity";
 import { Tenants } from "src/modules/tenants/entities/tenants.entity";
 
 @Entity({
     name: 'folders'
 })
+@Index(['tenantId', 'path'])
+@Index(['tenantId', 'parentId', 'name'], { unique: true })
 export class Folders extends BaseEntity {
     
     @Column({
@@ -47,9 +49,10 @@ export class Folders extends BaseEntity {
 
     @Column({
         name: 'deleted_by',
-        type: 'uuid'
+        type: 'uuid',
+        nullable: true
     })
-    deletedById!: string;
+    deletedById!: string | null;
     
     @ManyToOne(() => Users, user => user.id, { nullable: false })
     @JoinColumn({ name: 'updated_by' })
@@ -67,8 +70,8 @@ export class Folders extends BaseEntity {
     @JoinColumn({ name: 'tenant_id' })
     tenant!: Tenants;
 
-    @ManyToOne(() => Folders)
-    @JoinTable({ name: 'parent_id' })
+    @ManyToOne(() => Folders, folder => folder.children, { nullable: true })
+    @JoinColumn({ name: 'parent_id' })
     parent!: Folders | null;
 
     @OneToMany(() => Folders, folder => folder.parent)
