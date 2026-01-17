@@ -1,4 +1,4 @@
-import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from './core/config/config.module';
 import { AuthModule } from './core/auth/auth.module';
 import { DatabaseModule } from './core/database/database.module';
@@ -11,12 +11,15 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { ProcessingModule } from './modules/processing/processing.module';
 import { DemoModule } from './modules/demo/demo.module';
+import { BullMqModule } from './core/bullmq/redis.module';
+import { ElasticModule } from './core/elastic/elastic.module';
 
 @Module({
   imports: [
     ConfigModule, 
-    AuthModule, 
+    BullMqModule,
     DatabaseModule, 
+    AuthModule, 
     UsersModule, 
     TenantsModule, 
     HealthModule, 
@@ -24,7 +27,9 @@ import { DemoModule } from './modules/demo/demo.module';
     StorageModule, 
     DocumentsModule, 
     AuditModule, 
-    ProcessingModule, DemoModule, 
+    ProcessingModule, 
+    DemoModule, 
+    ElasticModule, 
   ],
   providers: [],
 })

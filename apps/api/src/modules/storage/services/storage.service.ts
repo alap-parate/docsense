@@ -15,9 +15,12 @@ import { S3Service } from "./s3.service";
 import { Folders } from "../entities/folder.entity";
 import { Files, FileStatus } from "../entities/files.entity";
 import { DocumentPages } from "src/modules/documents/entities/document-pages.entity";
-import { ProcessingJobs } from "src/modules/processing/entities/processing-job.entity";
+import { ProcessingJobs, JobType, JobStatus } from "src/modules/processing/entities/processing-job.entity";
+import { DocumentPagesRepository } from "src/modules/documents/repositories/document-pages.repository";
 import { TenantRepository } from "src/modules/tenants/repositories/tenant.repository";
 import { MembershipStatus } from "src/modules/tenants/constants/membership-status.enum";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
 
 @Injectable()
 export class StorageService implements OnModuleInit {
@@ -32,13 +35,16 @@ export class StorageService implements OnModuleInit {
         private readonly s3Service: S3Service,
         private readonly tenantRepo: TenantRepository,
         private readonly dataSource: DataSource,
-        @InjectRepository(DocumentPages)
-        private readonly documentPagesRepo: Repository<DocumentPages>,
+        private readonly documentPagesRepo: DocumentPagesRepository,
         @InjectRepository(Folders)
         private readonly foldersRepo: Repository<Folders>,
         @InjectRepository(Files)
         private readonly filesRepo: Repository<Files>,
-    ) {}
+        @InjectRepository(ProcessingJobs)
+        private readonly processingJobsRepo: Repository<ProcessingJobs>,
+        @InjectQueue('pdf-processing')
+        private readonly pdfQueue: Queue,
+    ) { }
 
     onModuleInit() {
         // Periodic cleanup for stale uploads
@@ -84,22 +90,11 @@ export class StorageService implements OnModuleInit {
         return `/${names.reverse().join("/")}`;
     }
 
-    private async getPageCounts(fileIds: string[]): Promise<Map<string, number>> {
+    private async getPageCounts(tenantId: string, fileIds: string[]): Promise<Map<string, number>> {
         if (fileIds.length === 0) {
             return new Map();
         }
-        const rows = await this.documentPagesRepo
-            .createQueryBuilder("page")
-            .select("page.file_id", "fileId")
-            .addSelect("COUNT(*)", "count")
-            .where("page.file_id IN (:...fileIds)", { fileIds })
-            .groupBy("page.file_id")
-            .getRawMany<{ fileId: string; count: string }>();
-        const map = new Map<string, number>();
-        for (const row of rows) {
-            map.set(row.fileId, Number(row.count));
-        }
-        return map;
+        return await this.documentPagesRepo.countByFileIds(tenantId, fileIds);
     }
 
     private async purgeExpiredDeleted(tenantId: string): Promise<void> {
@@ -559,10 +554,51 @@ export class StorageService implements OnModuleInit {
             throw new BadRequestException("Upload not found in storage");
         }
 
+        // Verify file has content (not 0 bytes)
+        const fileSize = await this.s3Service.getObjectSize(file.storageKey);
+        if (fileSize === null) {
+            throw new BadRequestException("Unable to get file size from storage");
+        }
+        if (fileSize === 0) {
+            throw new BadRequestException(
+                "File is empty (0 bytes) in storage. Please ensure the file was uploaded correctly."
+            );
+        }
+
+        if(file.status === FileStatus.UPLOADED) {
+            throw new BadRequestException("File is already uploaded");
+        } else if(file.status === FileStatus.PROCESSING) {
+            throw new BadRequestException("File is already being processed");
+        } else if(file.status === FileStatus.READY) {
+            throw new BadRequestException("File is already processed");
+        }
+
         await this.filesRepo.update(
             { id: file.id, tenantId },
             { status: FileStatus.UPLOADED }
         );
+
+        const bullmqJob = await this.pdfQueue.add('process-pdf', {
+            fileId: file.id,
+            tenantId,
+            s3Key: file.storageKey,
+            mimeType: file.mimeType,
+        }, {
+            attempts: 3,
+            backoff: {
+                type: 'exponential',
+                delay: 1000,
+            },
+            removeOnComplete: true,
+        });
+
+        // Create ProcessingJobs record to track the job
+        await this.processingJobsRepo.save({
+            fileId: file.id,
+            jobId: bullmqJob.id!,
+            type: JobType.INDEX,
+            status: JobStatus.PENDING
+        });
 
         return {
             fileId: file.id,
@@ -584,7 +620,7 @@ export class StorageService implements OnModuleInit {
         }
 
         const files = await this.fileRepo.listByFolderId(tenantId, folderId);
-        const pageCounts = await this.getPageCounts(files.map((f) => f.id));
+        const pageCounts = await this.getPageCounts(tenantId, files.map((f) => f.id));
 
         return files.map((file) => ({
             id: file.id,
@@ -609,7 +645,7 @@ export class StorageService implements OnModuleInit {
         }
 
         const [pageCount, folder] = await Promise.all([
-            this.documentPagesRepo.count({ where: { fileId: file.id } }),
+            this.documentPagesRepo.countByFileId(file.id),
             this.folderRepo.findById(tenantId, file.folderId),
         ]);
 
@@ -751,6 +787,7 @@ export class StorageService implements OnModuleInit {
                 continue;
             }
             await this.fileRepo.markDeleted(tenantId, [fileId], userId);
+            await this.documentPagesRepo.softDeletePages(tenantId, [fileId]);
             results.push({
                 fileId,
                 status: "RECYCLED",
@@ -911,6 +948,11 @@ export class StorageService implements OnModuleInit {
                                 files.map((f) => f.id),
                                 manager
                             );
+                            await this.documentPagesRepo.restorePages(
+                                tenantId,
+                                files.map((f) => f.id),
+                                manager
+                            );
                         }
                     }
                 });
@@ -949,6 +991,7 @@ export class StorageService implements OnModuleInit {
                 }
 
                 await this.fileRepo.restoreFiles(tenantId, [file.id]);
+                await this.documentPagesRepo.restorePages(tenantId, [file.id]);
                 results.push({
                     id,
                     type: "FILE",
@@ -1077,4 +1120,17 @@ export class StorageService implements OnModuleInit {
             await this.s3Service.deleteObject(file.storageKey);
         }
     }
+
+    async updateFileStatus(fileId: string, status: FileStatus): Promise<void> {
+        await this.filesRepo.update(fileId, { status });
+    }
+
+    async checkFileStatus(fileId: string): Promise<FileStatus> {
+        const file = await this.filesRepo.findOne({ where: { id: fileId } });
+        if (!file) {
+            throw new NotFoundException("File not found");
+        }
+        return file.status;
+    }
+
 }

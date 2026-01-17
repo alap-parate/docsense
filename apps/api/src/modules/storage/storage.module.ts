@@ -14,6 +14,9 @@ import { RecycleBinController } from './recycle-bin.controller';
 import { TenantsModule } from '../tenants/tenants.module';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from 'src/core/auth/auth.module';
+import { BullModule } from '@nestjs/bullmq';
+import { BullMqModule } from 'src/core/bullmq/redis.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
   imports: [
@@ -23,9 +26,14 @@ import { AuthModule } from 'src/core/auth/auth.module';
       DocumentPages,
       ProcessingJobs,
     ]),
+    BullMqModule,
+    BullModule.registerQueue({
+      name: 'pdf-processing'
+    }),
     ConfigModule,
     TenantsModule,
     AuthModule,
+    DocumentsModule,
   ],
   providers: [
     StorageService, 
@@ -38,6 +46,6 @@ import { AuthModule } from 'src/core/auth/auth.module';
     FilesController,
     RecycleBinController,
   ],
-  exports: [S3Service]
+  exports: [S3Service, StorageService]
 })
 export class StorageModule {}

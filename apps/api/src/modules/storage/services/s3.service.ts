@@ -1,8 +1,13 @@
 import { Inject, Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadBucketCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, HeadBucketCommand, HeadObjectCommand, GetObjectCommandOutput, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import storageConfig from 'src/core/config/configuration/storageConfig';
 import type { ConfigType } from '@nestjs/config';
+import { Readable } from 'stream';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { pipeline } from 'stream/promises';
 
 @Injectable()
 export class S3Service implements OnModuleInit {
@@ -46,7 +51,6 @@ export class S3Service implements OnModuleInit {
 
     /**
      * Checks if the configured bucket exists and is accessible
-     * @throws Error if bucket is not accessible
      */
     async checkBucketAccessibility(): Promise<void> {
         try {
@@ -154,6 +158,85 @@ export class S3Service implements OnModuleInit {
             }
             throw new Error(
                 `Failed to check object '${key}': ${error.message || 'Unknown error'}`
+            );
+        }
+    }
+
+    async getObjectSize(key: string): Promise<number | null> {
+        try {
+            const command = new HeadObjectCommand({
+                Bucket: this.bucket,
+                Key: key,
+            });
+            const response = await this.client.send(command);
+            return response.ContentLength ?? null;
+        } catch (error: any) {
+            const code = error?.$metadata?.httpStatusCode;
+            if (code === 404) {
+                return null;
+            }
+            throw new Error(
+                `Failed to get object size for '${key}': ${error.message || 'Unknown error'}`
+            );
+        }
+    }
+
+    async getFile(key: string): Promise<Buffer> {
+        const res = await this.client.send(
+            new GetObjectCommand({
+                Bucket: this.bucket,
+                Key: key,
+            })
+        )
+
+        const stream = res.Body as Readable;
+        const chunks: Buffer[] = [];
+
+        for await (const chunk of stream) {
+            chunks.push(chunk);
+        }
+
+        return Buffer.concat(chunks);
+    }
+
+    /**
+     * Streams a file from S3 to a temporary file on disk in chunks.
+     * This is memory-efficient for large files (e.g., 1GB+ PDFs).
+     * 
+     * @param key S3 object key
+     * @param chunkSize Size of each chunk in bytes (default: 8MB)
+     * @returns Path to the temporary file
+     * @throws Error if download fails
+     */
+    async streamToTempFile(key: string, chunkSize: number = 8 * 1024 * 1024): Promise<string> {
+        const tempFilePath = path.join(os.tmpdir(), `pdf-${Date.now()}-${Math.random().toString(36).substring(7)}.pdf`);
+        
+        try {
+            const res = await this.client.send(
+                new GetObjectCommand({
+                    Bucket: this.bucket,
+                    Key: key,
+                })
+            );
+
+            const stream = res.Body as Readable;
+            const writeStream = fs.createWriteStream(tempFilePath);
+            
+            // Use pipeline to handle backpressure and errors automatically
+            // This streams data in chunks (controlled by S3 SDK and Node.js streams)
+            // rather than loading everything into memory
+            await pipeline(stream, writeStream);
+            
+            this.logger.debug(`Streamed file ${key} to temporary file: ${tempFilePath}`);
+            
+            return tempFilePath;
+        } catch (error: any) {
+            // Clean up temp file on error
+            if (fs.existsSync(tempFilePath)) {
+                fs.unlinkSync(tempFilePath);
+            }
+            throw new Error(
+                `Failed to stream file '${key}' to temporary file: ${error.message || 'Unknown error'}`
             );
         }
     }

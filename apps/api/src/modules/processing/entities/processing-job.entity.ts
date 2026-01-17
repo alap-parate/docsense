@@ -42,6 +42,13 @@ export class ProcessingJobs extends BaseEntity {
     status!: JobStatus;
 
     @Column({
+        name: 'job_id',
+        type: 'varchar',
+        nullable: true
+    })
+    jobId?: string | null;
+
+    @Column({
         name: 'error',
         type: 'text',
         nullable: true

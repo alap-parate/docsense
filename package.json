@@ -24,5 +24,10 @@
   "homepage": "https://github.com/alap-parate/docsense#readme",
   "devDependencies": {
     "husky": "^8.0.0"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "^11.0.4",
+    "bullmq": "^5.66.5",
+    "pdf-parse": "^2.4.5"
   }
 }
