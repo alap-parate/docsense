@@ -13,6 +13,8 @@ import { ProcessingModule } from './modules/processing/processing.module';
 import { DemoModule } from './modules/demo/demo.module';
 import { BullMqModule } from './core/bullmq/redis.module';
 import { ElasticModule } from './core/elastic/elastic.module';
+import { SearchModule } from './modules/search/search.module';
+import { RAGModule } from './modules/rag/rag.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { ElasticModule } from './core/elastic/elastic.module';
     ProcessingModule, 
     DemoModule, 
     ElasticModule, 
+    SearchModule,
+    RAGModule,
   ],
   providers: [],
 })

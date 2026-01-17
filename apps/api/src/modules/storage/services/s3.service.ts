@@ -82,6 +82,34 @@ export class S3Service implements OnModuleInit {
         }
     }
 
+    async getPresignedDownloadUrl(
+        key: string,
+        expiresInSeconds = 3600
+    ): Promise<string> {
+        try {
+            this.logger.debug(`Generating presigned download URL for key: ${key}, bucket: ${this.bucket}`);
+            
+            const command = new GetObjectCommand({
+                Bucket: this.bucket,
+                Key: key,
+            });
+            
+            const url = await getSignedUrl(this.client, command, { 
+                expiresIn: expiresInSeconds,
+                signableHeaders: new Set(['host']),
+            });
+            
+            this.logger.debug(`Generated presigned download URL: ${url.substring(0, 200)}...`);
+            return url;
+        } catch (error: any) {
+            this.logger.error(`Failed to generate presigned download URL: ${error.message}`, error.stack);
+            throw new Error(
+                `Failed to generate presigned download URL: ${error.message || 'Unknown error'}. ` +
+                `Check MinIO connection and bucket configuration.`
+            );
+        }
+    }
+
     async getPresignedUploadUrl(
         key: string,
         contentType: string,
@@ -197,6 +225,27 @@ export class S3Service implements OnModuleInit {
         }
 
         return Buffer.concat(chunks);
+    }
+
+    /**
+     * Gets a file stream from S3 (for streaming large files)
+     * @param key S3 object key
+     * @returns Readable stream and ContentType
+     */
+    async getFileStream(key: string): Promise<{ stream: Readable; contentType?: string; contentLength?: number }> {
+        const res = await this.client.send(
+            new GetObjectCommand({
+                Bucket: this.bucket,
+                Key: key,
+            })
+        );
+
+        const stream = res.Body as Readable;
+        return {
+            stream,
+            contentType: res.ContentType,
+            contentLength: res.ContentLength,
+        };
     }
 
     /**

@@ -631,6 +631,64 @@ export class StorageService implements OnModuleInit {
         }));
     }
 
+    async getFileDownloadUrl(
+        userId: string,
+        tenantIdInput: string | undefined,
+        fileId: string,
+        expiresInSeconds = 3600
+    ): Promise<{ url: string; expiresIn: number }> {
+        const tenantId = this.resolveTenantId(tenantIdInput);
+        await this.ensureTenantAccess(userId, tenantId);
+
+        const file = await this.fileRepo.findById(tenantId, fileId);
+        if (!file) {
+            throw new NotFoundException("File not found");
+        }
+
+        const exists = await this.s3Service.objectExists(file.storageKey);
+        if (!exists) {
+            throw new NotFoundException("File not found in storage");
+        }
+
+        // Generate presigned URL for direct S3 access
+        // This offloads bandwidth to S3 instead of streaming through the server
+        const url = await this.s3Service.getPresignedDownloadUrl(file.storageKey, expiresInSeconds);
+
+        return {
+            url,
+            expiresIn: expiresInSeconds,
+        };
+    }
+
+    // Keep getFileStream for backward compatibility if needed, but prefer presigned URLs
+    async getFileStream(
+        userId: string,
+        tenantIdInput: string | undefined,
+        fileId: string
+    ) {
+        const tenantId = this.resolveTenantId(tenantIdInput);
+        await this.ensureTenantAccess(userId, tenantId);
+
+        const file = await this.fileRepo.findById(tenantId, fileId);
+        if (!file) {
+            throw new NotFoundException("File not found");
+        }
+
+        const exists = await this.s3Service.objectExists(file.storageKey);
+        if (!exists) {
+            throw new NotFoundException("File not found in storage");
+        }
+
+        const { stream, contentType, contentLength } = await this.s3Service.getFileStream(file.storageKey);
+
+        return {
+            stream,
+            contentType: contentType || file.mimeType || 'application/pdf',
+            contentLength,
+            fileName: file.originalName || file.name,
+        };
+    }
+
     async getFileDetail(
         userId: string,
         tenantIdInput: string | undefined,

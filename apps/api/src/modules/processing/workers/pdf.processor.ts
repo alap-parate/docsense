@@ -17,7 +17,12 @@ export interface ProcessPdfJob {
     mimeType: 'application/pdf';
 }
 
-@Processor('pdf-processing')
+// Get concurrency from environment variable, default to 3
+const PDF_PROCESSING_CONCURRENCY = parseInt(process.env.PDF_PROCESSING_CONCURRENCY || '3', 10);
+
+@Processor('pdf-processing', {
+    concurrency: PDF_PROCESSING_CONCURRENCY, // Process multiple PDFs concurrently
+})
 export class pdfProcessor extends WorkerHost {
     private readonly logger = new Logger(pdfProcessor.name);
 

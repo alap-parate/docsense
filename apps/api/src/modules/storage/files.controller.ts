@@ -1,4 +1,5 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Header, HttpCode, HttpStatus, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { StorageService } from "./services/storage.service";
 import { AuthGuard } from "src/core/auth/guards/auth-guard";
 import { CurrentUser } from "src/shared/decorators/current-user.decorator";
@@ -61,6 +62,25 @@ export class FilesController {
     ) {
         const tenantId = query.tenantId ?? user.tenantId;
         return this.storageService.getFileDetail(user.id, tenantId, params.fileId);
+    }
+
+    @Get(":fileId/download")
+    @HttpCode(HttpStatus.OK)
+    async getFileDownloadUrl(
+        @CurrentUser() user: AuthUser,
+        @Param() params: FileIdParamDto,
+        @Query() query: TenantQueryDto
+    ) {
+        const tenantId = query.tenantId ?? user.tenantId;
+        // Default expiration: 1 hour (3600 seconds)
+        // Frontend should use this URL immediately as it expires
+        const expiresIn = 3600;
+        return this.storageService.getFileDownloadUrl(
+            user.id,
+            tenantId,
+            params.fileId,
+            expiresIn
+        );
     }
 
     @Post("move")

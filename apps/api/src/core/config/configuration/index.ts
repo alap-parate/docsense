@@ -4,6 +4,7 @@ import inviteConfig from "./inviteConfig";
 import storageConfig from "./storageConfig";
 import elasticsearchConfig from "./elasticsearchConfig";
 import redisConfig from "./redisConfig";
+import llmConfig from "./llmConfig";
 
 export default [
     authConfig,
@@ -11,5 +12,6 @@ export default [
     inviteConfig,
     storageConfig,
     elasticsearchConfig,
-    redisConfig
+    redisConfig,
+    llmConfig
 ]
