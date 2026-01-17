@@ -1,43 +1,74 @@
 <p align="center">
-  <img align="center" src="https://github.com/alap-parate/docsense/blob/main/docs/logo.png" width="500" alt="accessibility text">
+  <img align="center" src="https://github.com/alap-parate/docsense/blob/main/docs/logo.png" width="500" alt="DocSense logo">
 </p>
-<h1 align="center" >
-  Docsense
+
+<h1 align="center">
+  DocSense
 </h1>
 
-DocSense is a document intelligence platform that allows users to upload PDFs
-and perform page-level full-text search with immediate context rendering.
+DocSense is an early-stage **document intelligence platform** that transforms PDFs into searchable, queryable knowledge.
 
-Instead of returning vague document matches, DocSense resolves queries directly
-to the exact pages where text appears and opens them instantly.
+Users can upload PDFs, search across them efficiently, and ask natural-language questions that are answered using the actual document content via Retrieval Augmented Generation (RAG).
+
+This project is functional and actively evolving, but **not yet horizontally scalable by design**. The focus is on correctness, clarity, and extensibility before large-scale optimization.
+
+---
 
 ## Why DocSense
 
-- PDFs are hard to search
-- Document-level search hides context
-- Users want answers, not filenames
+- PDFs are static and opaque
+- Document-level search hides relevant context
+- Keyword search alone is insufficient for real understanding
+- Users want **answers**, not filenames or vague matches
 
-DocSense treats search as navigation, not discovery.
+DocSense treats documents as structured data pipelines, not blobs.
 
-## Core Features
+---
 
+## What DocSense Does
+
+### User & Workspace Management
+- User authentication
+- Workspace-based multi-tenancy
+- Invite users to workspaces
+- Workspace-scoped documents and search
+
+### Document Ingestion
 - PDF upload with asynchronous processing
-- Page-level full-text search
-- Immediate page rendering with highlights
-- Tagging and tag-based filtering
-- Progress visibility during processing
-- Graceful handling of unprocessable PDFs
+- Immutable file storage
+- Clear processing lifecycle and status tracking
 
-## High-Level Design (Brief)
+### Document Processing Pipeline
+- PDF → pages
+- Pages → semantic chunks
+- Page- and chunk-level isolation for retries and parallelism
 
-DocSense separates responsibilities clearly:
+### Search & Retrieval
+- Page- and chunk-level full-text search using Elasticsearch
+- Workspace-scoped search
+- Fast, debuggable, rebuildable indexes
 
-- API handles requests and orchestration
-- Workers handle all heavy processing
-- Relational database stores authoritative metadata
-- Search engine stores rebuildable page-level indexes
+### Question Answering (RAG)
+- Retrieve relevant chunks using search
+- Generate answers grounded in document context
+- Local LLM inference using Gemma models
+- Embeddings generated once and reused
+
+---
+
+## Technology Stack
+
+- **Backend**: NestJS
+- **Queueing**: BullMQ + Redis
+- **Database**: PostgreSQL
+- **Search Engine**: Elasticsearch
+- **LLMs & Embeddings**: Gemma (via Ollama)
+- **Storage**: S3-compatible object storage (MinIO)
+
+---
 
 ## Status
 
 Active development.
 
+DocSense is a foundation for scalable document intelligence, with future plans for hybrid search, improved chunking strategies, streaming answers, and distributed processing.
