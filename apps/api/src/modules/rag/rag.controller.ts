@@ -22,6 +22,6 @@ export class RAGController {
         @CurrentUser() user: AuthUser
     ): Promise<RAGResponseDto> {
         const tenantId = user.tenantId ?? '';
-        return this.ragService.answerQuestion(dto, tenantId);
+        return this.ragService.answerQuestion(dto, tenantId, user.id);
     }
 }

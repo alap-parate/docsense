@@ -4,6 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Files } from 'src/modules/storage/entities/files.entity';
 import { SearchQueryDto, SearchMatchDto, SearchResponseDto } from '../dto/search.dto';
+import { QueryMode } from 'src/modules/query-history/constants/query-mode.enum';
+import { QueryHistoryService } from 'src/modules/query-history/services/query-history.service';
 
 @Injectable()
 export class SearchService {
@@ -12,12 +14,18 @@ export class SearchService {
     constructor(
         private readonly es: ElasticsearchService,
         @InjectRepository(Files)
-        private readonly filesRepo: Repository<Files>
+        private readonly filesRepo: Repository<Files>,
+        private readonly queryHistoryService: QueryHistoryService,
     ) {}
 
-    async search(query: SearchQueryDto, tenantId: string): Promise<SearchResponseDto> {
+    async search(
+        query: SearchQueryDto,
+        tenantId: string,
+        userId: string,
+    ): Promise<SearchResponseDto> {
         const { q, folderId, limit = 20, offset = 0 } = query;
         const searchTenantId = query.tenantId ?? tenantId;
+        const startTime = Date.now();
 
         if (!q || q.trim().length === 0) {
             return {
@@ -151,6 +159,16 @@ export class SearchService {
 
             if (fileIds.length === 0) {
                 this.logger.warn(`No fileIds found in Elasticsearch results for query: "${q}", tenantId: ${searchTenantId}`);
+                const totalTimeMs = Date.now() - startTime;
+                this.queryHistoryService.logQuery({
+                    tenantId: searchTenantId,
+                    userId,
+                    query: q,
+                    queryMode: QueryMode.KEYWORD,
+                    totalChunksRetrieved: 0,
+                    totalTimeMs,
+                    documentsUsed: [],
+                });
                 return {
                     matches: [],
                     total: totalValue,
@@ -202,6 +220,28 @@ export class SearchService {
                 .filter((match: SearchMatchDto | null): match is SearchMatchDto => match !== null);
 
             this.logger.debug(`Returning ${matches.length} matches after file metadata join`);
+
+            const totalTimeMs = Date.now() - startTime;
+            const topScores = matches.map((m) => m.score);
+            const rerankScore = topScores.length
+                ? topScores.reduce((a, b) => a + b, 0) / topScores.length
+                : null;
+            const documentsUsed = matches.map((m) => ({
+                fileId: m.fileId,
+                fileName: m.fileName,
+                pageNumber: m.pageNumber,
+                score: m.score,
+            }));
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: q,
+                queryMode: QueryMode.KEYWORD,
+                totalChunksRetrieved: matches.length,
+                rerankScore,
+                totalTimeMs,
+                documentsUsed,
+            });
 
             return {
                 matches,

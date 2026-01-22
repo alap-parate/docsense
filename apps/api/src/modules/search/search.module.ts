@@ -6,6 +6,7 @@ import { Files } from 'src/modules/storage/entities/files.entity';
 import { SearchService } from './services/search.service';
 import { SearchController } from './search.controller';
 import { AuthModule } from 'src/core/auth/auth.module';
+import { QueryHistoryModule } from 'src/modules/query-history/query-history.module';
 
 @Module({
     imports: [
@@ -13,6 +14,7 @@ import { AuthModule } from 'src/core/auth/auth.module';
         ElasticModule,
         StorageModule,
         AuthModule,
+        QueryHistoryModule,
     ],
     providers: [
         SearchService,

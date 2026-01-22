@@ -22,6 +22,7 @@ export class SearchController {
         @CurrentUser() user: AuthUser
     ): Promise<SearchResponseDto> {
         const tenantId = user.tenantId ?? '';
-        return this.searchService.search(query, tenantId);
+        const userId = user.id ?? '';
+        return this.searchService.search(query, tenantId, userId);
     }
 }

@@ -9,6 +9,10 @@ import { EsIndexerService } from "../services/es-indexer.service";
 import { StorageService } from "src/modules/storage/services/storage.service";
 import { FileStatus } from "src/modules/storage/entities/files.entity";
 import { ProcessingJobs, JobStatus } from "../entities/processing-job.entity";
+import {
+    ProcessingStage,
+    type StageTimings,
+} from "../constants/processing-stage.enum";
 
 export interface ProcessPdfJob {
     fileId: string;
@@ -17,11 +21,18 @@ export interface ProcessPdfJob {
     mimeType: 'application/pdf';
 }
 
-// Get concurrency from environment variable, default to 3
+export interface ProcessingProgress {
+    processedPages: number;
+    totalPages: number;
+    percent: number;
+    stage?: string;
+    stageTimings?: StageTimings;
+}
+
 const PDF_PROCESSING_CONCURRENCY = parseInt(process.env.PDF_PROCESSING_CONCURRENCY || '3', 10);
 
 @Processor('pdf-processing', {
-    concurrency: PDF_PROCESSING_CONCURRENCY, // Process multiple PDFs concurrently
+    concurrency: PDF_PROCESSING_CONCURRENCY,
 })
 export class pdfProcessor extends WorkerHost {
     private readonly logger = new Logger(pdfProcessor.name);
@@ -32,93 +43,136 @@ export class pdfProcessor extends WorkerHost {
         private readonly documentsService: DocumentsService,
         private readonly storageService: StorageService,
         @InjectRepository(ProcessingJobs)
-        private readonly processingJobsRepo: Repository<ProcessingJobs>
+        private readonly processingJobsRepo: Repository<ProcessingJobs>,
     ) {
         super();
+    }
+
+    private async updateProgress(
+        job: Job<ProcessPdfJob>,
+        progress: ProcessingProgress,
+    ): Promise<void> {
+        await job.updateProgress(progress);
+    }
+
+    private persistStageTimings(
+        jobId: string,
+        status: JobStatus,
+        stage: string,
+        stageTimings: StageTimings,
+        error?: string | null,
+    ): void {
+        this.processingJobsRepo
+            .update(
+                { jobId },
+                {
+                    status,
+                    stage,
+                    stageTimings,
+                    ...(error != null && { error }),
+                },
+            )
+            .catch((err) => {
+                const msg = err instanceof Error ? err.message : String(err);
+                this.logger.warn(`Failed to persist stage/timings for job ${jobId}: ${msg}`);
+            });
     }
 
     async process(job: Job<ProcessPdfJob>) {
         const { fileId, tenantId, s3Key } = job.data;
         const jobId = job.id!;
-        
+        const stageTimings: StageTimings = {};
+
         this.logger.log(`Processing PDF job ${jobId} for file ${fileId}`);
 
-        // Update job status to RUNNING
         try {
             await this.processingJobsRepo.update(
                 { jobId },
-                { status: JobStatus.RUNNING }
+                { status: JobStatus.RUNNING, stage: ProcessingStage.PDF_SPLITTING },
             );
         } catch (updateError) {
             this.logger.warn(`Failed to update job status to RUNNING for job ${jobId}: ${updateError}`);
         }
 
         try {
-            // Extract pages with progress tracking
+            const t0 = Date.now();
             const pages = await this.pdfExtractor.extractFromS3(s3Key, fileId);
+            stageTimings.pdfSplittingMs = Date.now() - t0;
             this.logger.log(`Extracted ${pages.length} pages from PDF ${fileId}`);
 
-            // Report initial progress
-            await job.updateProgress({
+            await this.updateProgress(job, {
                 processedPages: 0,
                 totalPages: pages.length,
-                percent: 0
+                percent: 0,
+                stage: ProcessingStage.SAVING_PAGES,
+                stageTimings: { ...stageTimings },
             });
 
-            // Save pages to database with progress tracking
+            const t1 = Date.now();
             for (let i = 0; i < pages.length; i++) {
                 const page = pages[i];
                 await this.documentsService.savePages([page], fileId, tenantId);
-                
-                // Update progress after each page
-                const progress = {
+                const percent = Math.floor(((i + 1) / pages.length) * 100);
+                await this.updateProgress(job, {
                     processedPages: i + 1,
                     totalPages: pages.length,
-                    percent: Math.floor(((i + 1) / pages.length) * 100)
-                };
-                await job.updateProgress(progress);
+                    percent,
+                    stage: ProcessingStage.SAVING_PAGES,
+                    stageTimings: { ...stageTimings, savingPagesMs: Date.now() - t1 },
+                });
             }
-            
+            stageTimings.savingPagesMs = Date.now() - t1;
             this.logger.log(`Saved ${pages.length} pages to database for file ${fileId}`);
-            
-            // Try to index to Elasticsearch, but don't fail the job if it fails
-            // Pages are already saved to the database, which is the source of truth
+
+            await this.updateProgress(job, {
+                processedPages: pages.length,
+                totalPages: pages.length,
+                percent: 100,
+                stage: ProcessingStage.EMBEDDING_GENERATION,
+                stageTimings: { ...stageTimings },
+            });
+
+            let embeddingMs = 0;
+            let indexingMs = 0;
             try {
-                await this.esIndexer.indexPages(tenantId, fileId, pages);
+                const timings = await this.esIndexer.indexPages(tenantId, fileId, pages);
+                embeddingMs = timings.embeddingMs;
+                indexingMs = timings.indexingMs;
+                stageTimings.embeddingMs = embeddingMs;
+                stageTimings.indexingMs = indexingMs;
                 this.logger.log(`Indexed ${pages.length} pages to Elasticsearch for file ${fileId}`);
             } catch (esError) {
                 const esErrorMessage = esError instanceof Error ? esError.message : String(esError);
                 this.logger.warn(
                     `Failed to index pages to Elasticsearch for file ${fileId}: ${esErrorMessage}. ` +
-                    `Pages are saved to database and can be re-indexed later.`
+                    `Pages are saved to database and can be re-indexed later.`,
                 );
             }
 
             await this.storageService.updateFileStatus(fileId, FileStatus.READY);
 
-            // Update job status to COMPLETED
-            await this.processingJobsRepo.update(
-                { jobId },
-                { status: JobStatus.COMPLETED }
+            this.persistStageTimings(
+                jobId,
+                JobStatus.COMPLETED,
+                ProcessingStage.COMPLETED,
+                stageTimings,
             );
 
-            return { pages: pages.length };
+            return { pages: pages.length, stageTimings };
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             const errorStack = error instanceof Error ? error.stack : undefined;
             this.logger.error(`Failed to process PDF job ${jobId} for file ${fileId}: ${errorMessage}`, errorStack);
-            
-            // Update job status to FAILED
-            try {
-                await this.processingJobsRepo.update(
-                    { jobId },
-                    { status: JobStatus.FAILED, error: errorMessage }
-                );
-            } catch (updateError) {
-                this.logger.warn(`Failed to update job status to FAILED for job ${jobId}: ${updateError}`);
-            }
-            
-            throw error; // Re-throw to mark job as failed
+
+            this.persistStageTimings(
+                jobId,
+                JobStatus.FAILED,
+                ProcessingStage.FAILED,
+                { ...stageTimings },
+                errorMessage,
+            );
+
+            throw error;
         }
     }
 }

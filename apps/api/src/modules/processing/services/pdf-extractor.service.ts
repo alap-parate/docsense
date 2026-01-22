@@ -60,9 +60,11 @@ export class PdfExtractorService {
             for (let pageNum = 1; pageNum <= numPages; pageNum++) {
                 const pageResult = await parser.getText({ partial: [pageNum] });
                 if (pageResult.text && pageResult.text.trim()) {
+                    // Sanitize text: remove null bytes (0x00) which PostgreSQL UTF-8 encoding rejects
+                    const sanitizedText = pageResult.text.replace(/\x00/g, '');
                     pages.push({
                         pageNumber: pageNum,
-                        text: pageResult.text
+                        text: sanitizedText
                     });
                 }
             }

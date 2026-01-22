@@ -14,10 +14,15 @@ export class EsIndexerService {
         private readonly chunkingService: ChunkingService
     ) {}
 
-    async indexPages(tenantId: string, fileId: string, pages: ExtractedPage[]): Promise<void> {
+    async indexPages(
+        tenantId: string,
+        fileId: string,
+        pages: ExtractedPage[],
+    ): Promise<{ embeddingMs: number; indexingMs: number }> {
+        const result = { embeddingMs: 0, indexingMs: 0 };
         if (pages.length === 0) {
             this.logger.warn(`No pages to index for file ${fileId}`);
-            return;
+            return result;
         }
 
         this.logger.log(`Indexing ${pages.length} pages for file ${fileId} with embeddings`);
@@ -50,13 +55,12 @@ export class EsIndexerService {
         this.logger.log(`Split into ${allChunks.length} chunks, generating embeddings in batches of 100...`);
 
         // Generate embeddings for all chunks in batches
+        const embeddingStart = Date.now();
         try {
             const texts = allChunks.map(chunk => chunk.text);
-            const startTime = Date.now();
             const embeddings = await this.embeddingService.generateEmbeddings(texts);
-            const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-            
-            this.logger.log(`Generated ${embeddings.length} embeddings in ${duration}s`);
+            result.embeddingMs = Date.now() - embeddingStart;
+            this.logger.log(`Generated ${embeddings.length} embeddings in ${(result.embeddingMs / 1000).toFixed(2)}s`);
 
             // Attach embeddings to chunks
             for (let i = 0; i < allChunks.length; i++) {
@@ -67,12 +71,12 @@ export class EsIndexerService {
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
             const errorStack = error instanceof Error ? error.stack : undefined;
+            result.embeddingMs = Date.now() - embeddingStart;
             this.logger.error(
                 `Failed to generate embeddings for file ${fileId}: ${errorMessage}`,
                 errorStack
             );
             this.logger.warn(`Indexing ${allChunks.length} chunks without embeddings. Keyword search will still work.`);
-            // Continue without embeddings - keyword search will still work
         }
 
         // Build bulk index body
@@ -96,11 +100,13 @@ export class EsIndexerService {
             ];
         });
 
+        const indexingStart = Date.now();
         try {
             const response = await this.es.bulk({ 
                 refresh: false, 
                 body 
             });
+            result.indexingMs = Date.now() - indexingStart;
 
             if (response.errors) {
                 const failedItems = response.items.filter((item: any) => item.index?.error);
@@ -118,6 +124,7 @@ export class EsIndexerService {
                 this.logger.log(`Successfully indexed ${allChunks.length} chunks for file ${fileId}`);
             }
         } catch (error) {
+            result.indexingMs = Date.now() - indexingStart;
             const errorMessage = error instanceof Error ? error.message : String(error);
             const errorStack = error instanceof Error ? error.stack : undefined;
             this.logger.error(
@@ -126,5 +133,6 @@ export class EsIndexerService {
             );
             throw error;
         }
+        return result;
     }
 }

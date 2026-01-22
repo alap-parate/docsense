@@ -15,6 +15,7 @@ import { BullMqModule } from './core/bullmq/redis.module';
 import { ElasticModule } from './core/elastic/elastic.module';
 import { SearchModule } from './modules/search/search.module';
 import { RAGModule } from './modules/rag/rag.module';
+import { QueryHistoryModule } from './modules/query-history/query-history.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { RAGModule } from './modules/rag/rag.module';
     ElasticModule, 
     SearchModule,
     RAGModule,
+    QueryHistoryModule,
   ],
   providers: [],
 })

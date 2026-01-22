@@ -6,6 +6,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Files } from 'src/modules/storage/entities/files.entity';
 
+import { QueryMode } from 'src/modules/query-history/constants/query-mode.enum';
+import { QueryHistoryService } from 'src/modules/query-history/services/query-history.service';
+
 export interface RAGQuery {
     question: string;
     tenantId?: string;
@@ -41,14 +44,19 @@ export class RAGService {
         private readonly embeddingService: EmbeddingService,
         private readonly llmService: LLMService,
         @InjectRepository(Files)
-        private readonly filesRepo: Repository<Files>
+        private readonly filesRepo: Repository<Files>,
+        private readonly queryHistoryService: QueryHistoryService,
     ) {}
 
-    async answerQuestion(query: RAGQuery, userTenantId: string): Promise<RAGResponse> {
+    async answerQuestion(
+        query: RAGQuery,
+        userTenantId: string,
+        userId: string,
+    ): Promise<RAGResponse> {
         const { question, tenantId, folderId, topK, useHybridSearch = true } = query;
-        // Default topK to 5 if not provided by user
         const effectiveTopK = topK ?? 5;
         const searchTenantId = tenantId ?? userTenantId;
+        const startTime = Date.now();
 
         if (!question || question.trim().length === 0) {
             throw new Error('Question cannot be empty');
@@ -56,19 +64,13 @@ export class RAGService {
 
         this.logger.log(`Processing RAG query: "${question}"`);
 
-        // Step 1: Generate embedding for the question (with aggressive timeout for speed)
-        // Skip embedding if useHybridSearch is false for fastest response
         let queryEmbedding: number[] | null = null;
-        
         if (useHybridSearch) {
             try {
-                // Aggressive timeout: only wait 1.5 seconds for embedding
-                // If it takes longer, proceed with keyword-only search
                 queryEmbedding = await Promise.race([
                     this.embeddingService.generateEmbedding(question),
                     new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500))
                 ]) as number[] | null;
-                
                 if (queryEmbedding) {
                     this.logger.debug(`Generated query embedding (dimension: ${queryEmbedding.length})`);
                 } else {
@@ -81,7 +83,10 @@ export class RAGService {
             }
         }
 
-        // Step 2: Perform hybrid search (keyword + semantic)
+        // /ask is always RAG search. useHybridSearch true + hybrid retrieval → HYBRID; else → RAG (keyword-only).
+        const usedHybrid = useHybridSearch && !!queryEmbedding && queryEmbedding.length > 0;
+        const queryMode: QueryMode = usedHybrid ? QueryMode.HYBRID : QueryMode.RAG;
+
         const searchResults = await this.hybridSearch(
             question,
             queryEmbedding,
@@ -91,6 +96,16 @@ export class RAGService {
         );
 
         if (searchResults.length === 0) {
+            const totalTimeMs = Date.now() - startTime;
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: question,
+                queryMode,
+                totalChunksRetrieved: 0,
+                totalTimeMs,
+                documentsUsed: [],
+            });
             return {
                 answer: "I couldn't find any relevant information in the documents to answer your question.",
                 sources: [],
@@ -98,28 +113,19 @@ export class RAGService {
             };
         }
 
-        // Step 3: Fetch file metadata (can be done in parallel with search, but we need search results first)
         const fileIds = [...new Set(searchResults.map(r => r.fileId))];
         const files = await this.filesRepo.find({
-            where: {
-                id: In(fileIds),
-                tenantId: searchTenantId
-            },
+            where: { id: In(fileIds), tenantId: searchTenantId },
             select: ['id', 'name', 'originalName']
         });
-
         const fileMap = new Map(files.map(f => [f.id, f]));
 
-        // Step 4: Prepare context chunks for LLM (limit and truncate for speed)
-        // Use all retrieved chunks (up to effectiveTopK) and truncate each to max 500 chars for faster LLM processing
         const maxChunkLength = 500;
-        
         const contextChunks = searchResults
             .slice(0, effectiveTopK)
             .map(result => {
                 const content = result.content;
-                // Truncate long chunks
-                return content.length > maxChunkLength 
+                return content.length > maxChunkLength
                     ? content.substring(0, maxChunkLength) + '...'
                     : content;
             })
@@ -137,9 +143,34 @@ export class RAGService {
             };
         });
 
-        // Step 5: Generate answer using LLM (with optimized settings)
         this.logger.log(`Generating answer using LLM with ${contextChunks.length} context chunks (truncated)`);
         const llmResponse = await this.llmService.generateAnswer(question, contextChunks);
+
+        const totalTimeMs = Date.now() - startTime;
+        const topScores = searchResults.slice(0, effectiveTopK).map(r => r.score);
+        const rerankScore = topScores.length
+            ? topScores.reduce((a, b) => a + b, 0) / topScores.length
+            : null;
+        const documentsUsed = sources.map(s => ({
+            fileId: s.fileId,
+            fileName: s.fileName,
+            pageNumber: s.pageNumber,
+            chunkIndex: s.chunkIndex,
+            score: s.score,
+        }));
+
+        this.queryHistoryService.logQuery({
+            tenantId: searchTenantId,
+            userId,
+            query: question,
+            queryMode,
+            confidence: llmResponse.confidence ?? null,
+            totalChunksRetrieved: searchResults.length,
+            rerankScore,
+            totalTimeMs,
+            documentsUsed,
+            citations: null,
+        });
 
         return {
             answer: llmResponse.answer,

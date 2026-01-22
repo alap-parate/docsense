@@ -1,6 +1,7 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
 import { Entity, Column, ManyToOne, JoinColumn } from "typeorm";
 import { Files } from "src/modules/storage/entities/files.entity";
+import type { StageTimings } from "../constants/processing-stage.enum";
 
 export enum JobType {
     OCR = 'OCR',
@@ -55,8 +56,22 @@ export class ProcessingJobs extends BaseEntity {
     })
     error?: string | null;
 
+    @Column({
+        name: 'stage',
+        type: 'varchar',
+        length: 64,
+        nullable: true,
+    })
+    stage?: string | null;
+
+    @Column({
+        name: 'stage_timings',
+        type: 'jsonb',
+        nullable: true,
+    })
+    stageTimings?: StageTimings | null;
+
     @ManyToOne(() => Files, file => file.id, { nullable: false })
     @JoinColumn({ name: 'file_id' })
     file!: Files;
-    
 }

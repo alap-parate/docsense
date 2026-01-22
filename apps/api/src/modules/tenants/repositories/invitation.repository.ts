@@ -20,6 +20,7 @@ export class InvitationRepository {
         role: TenantRole,
         tokenHash: string,
         expiresAt: Date,
+        invitedAt: Date,
     ): Promise<TenantInvitations> {
         const result = await this.tenantInvRepo
             .createQueryBuilder()
@@ -33,6 +34,7 @@ export class InvitationRepository {
                 tokenHash,
                 status: InvitationStatus.PENDING,
                 expiresAt,
+                invitedAt,
                 createdById: inviterUserId,
             })
             .returning('*')

@@ -66,7 +66,7 @@ export class TenantInvitations extends BaseEntity {
         name: 'invited_at',
         type: 'timestamp with time zone',
     })
-    invitedAt?: Date; 
+    invitedAt!: Date; 
 
     @Column({
         name: 'accepted_by',

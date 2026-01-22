@@ -47,7 +47,7 @@ export class InvitationService {
         const token = `${tenantId}:${user.id}`;
         const tokenHash = generateHash(token, this.inviteTokenSecert);
         const expiry = new Date(Date.now() + ms(this.inviteTokenExpiry));
-        const response = await this.invRepo.inviteUser(inviterId, user.id, tenantId, email, role, tokenHash, expiry);
+        const response = await this.invRepo.inviteUser(inviterId, user.id, tenantId, email, role, tokenHash, expiry, new Date());
 
         // trigger a mail event here with original token
 
@@ -70,8 +70,9 @@ export class InvitationService {
         if(invite?.status && invite.status == InvitationStatus.REVOKED) {
             throw new GoneException('Invitation has been revoked')
         }
-
-        if(invite?.expiresAt && invite.expiresAt > new Date()) {
+        console.log(invite?.expiresAt);
+        console.log(new Date());
+        if(invite?.expiresAt && invite.expiresAt < new Date()) {
             await this.invRepo.expireToken(tokenHash)
             throw new GoneException('Invitation is expired')
         }

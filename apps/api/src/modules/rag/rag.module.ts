@@ -10,6 +10,7 @@ import { ChunkingService } from './services/chunking.service';
 import { RAGService } from './services/rag.service';
 import { RAGController } from './rag.controller';
 import { AuthModule } from 'src/core/auth/auth.module';
+import { QueryHistoryModule } from 'src/modules/query-history/query-history.module';
 
 @Module({
     imports: [
@@ -18,6 +19,7 @@ import { AuthModule } from 'src/core/auth/auth.module';
         ElasticModule,
         StorageModule,
         AuthModule,
+        QueryHistoryModule,
     ],
     providers: [
         EmbeddingService,
