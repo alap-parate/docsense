@@ -5,7 +5,8 @@ import { AuthGuard } from "src/core/auth/guards/auth-guard";
 import { CurrentUser } from "src/shared/decorators/current-user.decorator";
 import type { AuthUser } from "src/shared/types/auth-user.type";
 import { ProcessingJobsService } from "./services/processing-jobs.service";
-import type { StageTimings } from "./constants/processing-stage.enum";
+import type { StageHistoryEntry, StageTimings } from "./constants/processing-stage.enum";
+import type { JobStatus, JobType } from "./entities/processing-job.entity";
 
 export interface ProgressResponse {
     processedPages: number;
@@ -14,6 +15,20 @@ export interface ProgressResponse {
     status: string;
     stage?: string | null;
     stageTimings?: StageTimings | null;
+}
+
+export interface ProcessingHistoryResponse {
+    id: string;
+    fileId: string;
+    type: JobType;
+    status: JobStatus;
+    jobId?: string | null;
+    error?: string | null;
+    stage?: string | null;
+    stageTimings?: StageTimings | null;
+    stageHistory?: StageHistoryEntry[] | null;
+    createdAt: string;
+    updatedAt: string;
 }
 
 @Controller({
@@ -74,5 +89,26 @@ export class ProcessingController {
             stage: processingJob.stage ?? null,
             stageTimings: processingJob.stageTimings ?? null,
         };
+    }
+
+    @Get("history/:fileId")
+    async getProcessingHistory(
+        @Param("fileId") fileId: string,
+        @CurrentUser() _user: AuthUser,
+    ): Promise<ProcessingHistoryResponse[]> {
+        const jobs = await this.processingJobsService.findAllByFileId(fileId);
+        return jobs.map((job) => ({
+            id: job.id,
+            fileId: job.fileId,
+            type: job.type,
+            status: job.status,
+            jobId: job.jobId ?? null,
+            error: job.error ?? null,
+            stage: job.stage ?? null,
+            stageTimings: job.stageTimings ?? null,
+            stageHistory: job.stageHistory ?? null,
+            createdAt: job.createdAt.toISOString(),
+            updatedAt: (job.updatedAt ?? job.createdAt).toISOString(),
+        }));
     }
 }

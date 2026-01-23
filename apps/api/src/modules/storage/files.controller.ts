@@ -1,5 +1,4 @@
 import { Body, Controller, Get, Header, HttpCode, HttpStatus, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
-import type { Response } from "express";
 import { StorageService } from "./services/storage.service";
 import { AuthGuard } from "src/core/auth/guards/auth-guard";
 import { CurrentUser } from "src/shared/decorators/current-user.decorator";

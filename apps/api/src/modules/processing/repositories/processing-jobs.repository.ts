@@ -22,6 +22,13 @@ export class ProcessingJobsRepository {
         });
     }
 
+    async findAllByFileId(fileId: string): Promise<ProcessingJobs[]> {
+        return await this.processingJobsRepo.find({
+            where: { fileId },
+            order: { createdAt: 'DESC' }
+        });
+    }
+
     async findByJobId(jobId: string): Promise<ProcessingJobs | null> {
         return await this.processingJobsRepo.findOne({
             where: { jobId }

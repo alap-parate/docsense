@@ -11,6 +11,7 @@ import { FileStatus } from "src/modules/storage/entities/files.entity";
 import { ProcessingJobs, JobStatus } from "../entities/processing-job.entity";
 import {
     ProcessingStage,
+    type StageHistoryEntry,
     type StageTimings,
 } from "../constants/processing-stage.enum";
 
@@ -55,11 +56,12 @@ export class pdfProcessor extends WorkerHost {
         await job.updateProgress(progress);
     }
 
-    private persistStageTimings(
+    private persistJobState(
         jobId: string,
         status: JobStatus,
         stage: string,
         stageTimings: StageTimings,
+        stageHistory: StageHistoryEntry[],
         error?: string | null,
     ): void {
         this.processingJobsRepo
@@ -69,19 +71,36 @@ export class pdfProcessor extends WorkerHost {
                     status,
                     stage,
                     stageTimings,
+                    stageHistory,
                     ...(error != null && { error }),
                 },
             )
             .catch((err) => {
                 const msg = err instanceof Error ? err.message : String(err);
-                this.logger.warn(`Failed to persist stage/timings for job ${jobId}: ${msg}`);
+                this.logger.warn(`Failed to persist stage/timings/history for job ${jobId}: ${msg}`);
             });
+    }
+
+    private recordStage(
+        stageHistory: StageHistoryEntry[],
+        stage: ProcessingStage,
+        startedAt: number,
+        endedAt: number,
+    ): void {
+        if (endedAt <= startedAt) return;
+        stageHistory.push({
+            stage,
+            startedAt: new Date(startedAt).toISOString(),
+            endedAt: new Date(endedAt).toISOString(),
+            durationMs: endedAt - startedAt,
+        });
     }
 
     async process(job: Job<ProcessPdfJob>) {
         const { fileId, tenantId, s3Key } = job.data;
         const jobId = job.id!;
         const stageTimings: StageTimings = {};
+        const stageHistory: StageHistoryEntry[] = [];
 
         this.logger.log(`Processing PDF job ${jobId} for file ${fileId}`);
 
@@ -97,7 +116,9 @@ export class pdfProcessor extends WorkerHost {
         try {
             const t0 = Date.now();
             const pages = await this.pdfExtractor.extractFromS3(s3Key, fileId);
-            stageTimings.pdfSplittingMs = Date.now() - t0;
+            const splitEnd = Date.now();
+            stageTimings.pdfSplittingMs = splitEnd - t0;
+            this.recordStage(stageHistory, ProcessingStage.PDF_SPLITTING, t0, splitEnd);
             this.logger.log(`Extracted ${pages.length} pages from PDF ${fileId}`);
 
             await this.updateProgress(job, {
@@ -121,25 +142,47 @@ export class pdfProcessor extends WorkerHost {
                     stageTimings: { ...stageTimings, savingPagesMs: Date.now() - t1 },
                 });
             }
-            stageTimings.savingPagesMs = Date.now() - t1;
+            const savingEnd = Date.now();
+            stageTimings.savingPagesMs = savingEnd - t1;
+            this.recordStage(stageHistory, ProcessingStage.SAVING_PAGES, t1, savingEnd);
             this.logger.log(`Saved ${pages.length} pages to database for file ${fileId}`);
 
             await this.updateProgress(job, {
                 processedPages: pages.length,
                 totalPages: pages.length,
                 percent: 100,
-                stage: ProcessingStage.EMBEDDING_GENERATION,
+                stage: ProcessingStage.CHUNKING,
                 stageTimings: { ...stageTimings },
             });
 
+            const indexingStart = Date.now();
             let embeddingMs = 0;
             let indexingMs = 0;
+            let chunkingMs = 0;
             try {
                 const timings = await this.esIndexer.indexPages(tenantId, fileId, pages);
+                chunkingMs = timings.chunkingMs;
                 embeddingMs = timings.embeddingMs;
                 indexingMs = timings.indexingMs;
+                stageTimings.chunkingMs = chunkingMs;
                 stageTimings.embeddingMs = embeddingMs;
                 stageTimings.indexingMs = indexingMs;
+                const indexingEnd = Date.now();
+                let cursor = indexingStart;
+                if (chunkingMs > 0) {
+                    const end = Math.min(cursor + chunkingMs, indexingEnd);
+                    this.recordStage(stageHistory, ProcessingStage.CHUNKING, cursor, end);
+                    cursor = end;
+                }
+                if (embeddingMs > 0) {
+                    const end = Math.min(cursor + embeddingMs, indexingEnd);
+                    this.recordStage(stageHistory, ProcessingStage.EMBEDDING_GENERATION, cursor, end);
+                    cursor = end;
+                }
+                if (indexingMs > 0) {
+                    const end = Math.min(cursor + indexingMs, indexingEnd);
+                    this.recordStage(stageHistory, ProcessingStage.INDEXING, cursor, end);
+                }
                 this.logger.log(`Indexed ${pages.length} pages to Elasticsearch for file ${fileId}`);
             } catch (esError) {
                 const esErrorMessage = esError instanceof Error ? esError.message : String(esError);
@@ -149,13 +192,22 @@ export class pdfProcessor extends WorkerHost {
                 );
             }
 
+            await this.updateProgress(job, {
+                processedPages: pages.length,
+                totalPages: pages.length,
+                percent: 100,
+                stage: ProcessingStage.INDEXING,
+                stageTimings: { ...stageTimings },
+            });
+
             await this.storageService.updateFileStatus(fileId, FileStatus.READY);
 
-            this.persistStageTimings(
+            this.persistJobState(
                 jobId,
                 JobStatus.COMPLETED,
                 ProcessingStage.COMPLETED,
                 stageTimings,
+                stageHistory,
             );
 
             return { pages: pages.length, stageTimings };
@@ -164,11 +216,12 @@ export class pdfProcessor extends WorkerHost {
             const errorStack = error instanceof Error ? error.stack : undefined;
             this.logger.error(`Failed to process PDF job ${jobId} for file ${fileId}: ${errorMessage}`, errorStack);
 
-            this.persistStageTimings(
+            this.persistJobState(
                 jobId,
                 JobStatus.FAILED,
                 ProcessingStage.FAILED,
                 { ...stageTimings },
+                stageHistory,
                 errorMessage,
             );
 

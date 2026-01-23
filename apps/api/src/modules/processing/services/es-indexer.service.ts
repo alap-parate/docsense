@@ -18,8 +18,8 @@ export class EsIndexerService {
         tenantId: string,
         fileId: string,
         pages: ExtractedPage[],
-    ): Promise<{ embeddingMs: number; indexingMs: number }> {
-        const result = { embeddingMs: 0, indexingMs: 0 };
+    ): Promise<{ chunkingMs: number; embeddingMs: number; indexingMs: number }> {
+        const result = { chunkingMs: 0, embeddingMs: 0, indexingMs: 0 };
         if (pages.length === 0) {
             this.logger.warn(`No pages to index for file ${fileId}`);
             return result;
@@ -35,6 +35,7 @@ export class EsIndexerService {
             embedding?: number[];
         }> = [];
 
+        const chunkingStart = Date.now();
         for (const page of pages) {
             const chunks = this.chunkingService.splitIntoChunks(
                 page.text,
@@ -51,6 +52,7 @@ export class EsIndexerService {
                 });
             }
         }
+        result.chunkingMs = Date.now() - chunkingStart;
 
         this.logger.log(`Split into ${allChunks.length} chunks, generating embeddings in batches of 100...`);
 

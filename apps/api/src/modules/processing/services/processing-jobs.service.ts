@@ -33,6 +33,10 @@ export class ProcessingJobsService {
         return await this.processingJobsRepo.findByFileId(fileId);
     }
 
+    async findAllByFileId(fileId: string): Promise<ProcessingJobs[]> {
+        return await this.processingJobsRepo.findAllByFileId(fileId);
+    }
+
     async findByJobId(jobId: string): Promise<ProcessingJobs | null> {
         return await this.processingJobsRepo.findByJobId(jobId);
     }

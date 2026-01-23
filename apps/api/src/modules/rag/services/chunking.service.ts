@@ -37,6 +37,19 @@ export class ChunkingService {
         const semanticBoundaries = this.findSemanticBoundaries(text);
         
         if (semanticBoundaries.length > 0) {
+            // If any segment between semantic boundaries exceeds chunkSize,
+            // fall back to sliding window to enforce a hard max length.
+            let prevBoundary = 0;
+            for (const boundary of semanticBoundaries) {
+                if (boundary - prevBoundary > chunkSize) {
+                    return this.slidingWindowChunk(text, pageNumber, chunkSize, overlap);
+                }
+                prevBoundary = boundary;
+            }
+            if (text.length - prevBoundary > chunkSize) {
+                return this.slidingWindowChunk(text, pageNumber, chunkSize, overlap);
+            }
+
             // Split on semantic boundaries
             let currentChunk = '';
             let currentStart = 0;

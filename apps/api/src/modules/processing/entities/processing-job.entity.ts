@@ -1,7 +1,7 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
 import { Entity, Column, ManyToOne, JoinColumn } from "typeorm";
 import { Files } from "src/modules/storage/entities/files.entity";
-import type { StageTimings } from "../constants/processing-stage.enum";
+import type { StageHistoryEntry, StageTimings } from "../constants/processing-stage.enum";
 
 export enum JobType {
     OCR = 'OCR',
@@ -70,6 +70,13 @@ export class ProcessingJobs extends BaseEntity {
         nullable: true,
     })
     stageTimings?: StageTimings | null;
+
+    @Column({
+        name: 'stage_history',
+        type: 'jsonb',
+        nullable: true,
+    })
+    stageHistory?: StageHistoryEntry[] | null;
 
     @ManyToOne(() => Files, file => file.id, { nullable: false })
     @JoinColumn({ name: 'file_id' })
