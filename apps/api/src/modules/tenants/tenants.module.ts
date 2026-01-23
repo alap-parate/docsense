@@ -11,6 +11,7 @@ import { Folders } from '../storage/entities/folder.entity';
 import { TenantsController } from './tenants.controller';
 import { AuthModule } from 'src/core/auth/auth.module';
 import { UsersModule } from 'src/modules/users/users.module';
+import { TenantGuard } from './guards/tenant-guard';
 
 @Module({
   imports: [
@@ -28,9 +29,11 @@ import { UsersModule } from 'src/modules/users/users.module';
     InvitationService,
     TenantRepository,
     InvitationRepository,
+    TenantGuard,
   ],
   exports: [
-    TenantRepository
+    TenantRepository,
+    TenantGuard,
   ],
   controllers: [TenantsController]
 })

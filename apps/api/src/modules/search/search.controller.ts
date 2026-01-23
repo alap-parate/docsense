@@ -1,5 +1,6 @@
 import { Controller, Get, Query, UseGuards, HttpCode, HttpStatus } from "@nestjs/common";
 import { AuthGuard } from "src/core/auth/guards/auth-guard";
+import { TenantGuard } from "src/modules/tenants/guards/tenant-guard";
 import { CurrentUser } from "src/shared/decorators/current-user.decorator";
 import type { AuthUser } from "src/shared/types/auth-user.type";
 import { SearchService } from "./services/search.service";
@@ -9,7 +10,7 @@ import { SearchQueryDto, SearchResponseDto } from "./dto/search.dto";
     version: "1",
     path: "search",
 })
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, TenantGuard)
 export class SearchController {
     constructor(
         private readonly searchService: SearchService

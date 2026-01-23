@@ -6,7 +6,7 @@ import { InvitationStatus } from "../constants/invitation-status.enum";
 import { TenantRole } from "../constants/tenant-role.enum";
 import Joi from "joi";
 
-@Unique(['tenantId', 'userId'])
+@Unique(['tenantId', 'email'])
 @Entity({
     name: 'tenant_invitations'
 })
@@ -15,14 +15,12 @@ export class TenantInvitations extends BaseEntity {
     @Column({ 
         name: 'tenant_id',
         type: 'uuid',
-        unique: true
     })
     tenantId!: string;
 
     @Column({ 
         name: 'email',
         type: 'varchar',
-        unique: true
     })
     email!: string;
 

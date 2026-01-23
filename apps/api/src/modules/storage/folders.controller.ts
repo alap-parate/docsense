@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { StorageService } from "./services/storage.service";
 import { AuthGuard } from "src/core/auth/guards/auth-guard";
+import { TenantGuard } from "src/modules/tenants/guards/tenant-guard";
 import { CurrentUser } from "src/shared/decorators/current-user.decorator";
 import type { AuthUser } from "src/shared/types/auth-user.type";
 import {
@@ -16,7 +17,7 @@ import {
     version: "1",
     path: "folders",
 })
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, TenantGuard)
 export class FoldersController {
     constructor(private readonly storageService: StorageService) {}
 

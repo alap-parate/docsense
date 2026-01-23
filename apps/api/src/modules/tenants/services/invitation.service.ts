@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, Inject, ConflictException, GoneException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, ConflictException, GoneException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InvitationRepository } from '../repositories/invitation.repository';
 import { UserRepository } from 'src/modules/users/repositories/user.repository';
 import { TenantRole } from '../constants/tenant-role.enum';
@@ -34,20 +34,76 @@ export class InvitationService {
         role: TenantRole,
         inviterId: string,
     ) {
+        // Check inviter's role and permissions
+        const inviterMembership = await this.tenantUserRepo.findUser(inviterId, tenantId);
+        if (!inviterMembership || inviterMembership.status !== MembershipStatus.ACTIVE) {
+            throw new ForbiddenException('You are not an active member of this tenant');
+        }
+
+        const inviterRole = inviterMembership.role;
+
+        // Role-based permission checks
+        // if (inviterRole === TenantRole.OWNER) {
+        //     throw new ForbiddenException('Owners cannot send invitations');
+        // }
+
+        if (inviterRole === TenantRole.MEMBER || inviterRole === TenantRole.VIEWER) {
+            throw new ForbiddenException(`${inviterRole}s cannot send invitations`);
+        }
+
+        // EDITOR can only invite MEMBER and VIEWER, not EDITOR
+        if (inviterRole === TenantRole.EDITOR) {
+            if (role === TenantRole.EDITOR) {
+                throw new ForbiddenException('Editors cannot invite other editors');
+            }
+            if (![TenantRole.MEMBER, TenantRole.VIEWER].includes(role)) {
+                throw new BadRequestException(`Editors can only invite ${TenantRole.MEMBER} or ${TenantRole.VIEWER} roles`);
+            }
+        }
+
+        // Validate target role (should not be OWNER)
+        if (role === TenantRole.OWNER) {
+            throw new BadRequestException('Cannot invite users as OWNER');
+        }
+
+        if (![TenantRole.EDITOR, TenantRole.MEMBER, TenantRole.VIEWER].includes(role)) {
+            throw new BadRequestException('Invalid role');
+        }
+
         const user = await this.userRepo.findByEmail(email);
-        if(!user) {
+        if (!user) {
             throw new NotFoundException('User not found');
         }
 
-        const invite = await this.invRepo.findInvite(user.id, tenantId);
-        if(invite?.expiresAt && invite.expiresAt  < new Date()) {
-            throw new ConflictException('User already has a pending invitation')
+        // Check if user is already an active member of the tenant
+        const existingMembership = await this.tenantUserRepo.findUser(user.id, tenantId);
+        if (existingMembership?.status === MembershipStatus.ACTIVE) {
+            throw new ConflictException('User is already an active member of this tenant');
+        }
+
+        // Check if this email already has a pending (non-expired) invitation for this tenant
+        // Use email+tenantId because the unique constraint is on (tenantId, email)
+        const existingInvite = await this.invRepo.findInviteByEmailAndTenant(email, tenantId);
+        if (existingInvite) {
+            // If invite exists and hasn't expired, it's still pending
+            if (!existingInvite.expiresAt || existingInvite.expiresAt >= new Date()) {
+                throw new ConflictException('This email already has a pending invitation for this tenant');
+            }
         }
 
         const token = `${tenantId}:${user.id}`;
         const tokenHash = generateHash(token, this.inviteTokenSecert);
         const expiry = new Date(Date.now() + ms(this.inviteTokenExpiry));
-        const response = await this.invRepo.inviteUser(inviterId, user.id, tenantId, email, role, tokenHash, expiry, new Date());
+        const response = await this.invRepo.inviteUser(
+            inviterId,
+            user.id,
+            tenantId,
+            email,
+            role,
+            tokenHash,
+            expiry,
+            new Date(),
+        );
 
         // trigger a mail event here with original token
 

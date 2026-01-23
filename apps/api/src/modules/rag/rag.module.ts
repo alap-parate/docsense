@@ -11,6 +11,7 @@ import { RAGService } from './services/rag.service';
 import { RAGController } from './rag.controller';
 import { AuthModule } from 'src/core/auth/auth.module';
 import { QueryHistoryModule } from 'src/modules/query-history/query-history.module';
+import { TenantsModule } from 'src/modules/tenants/tenants.module';
 
 @Module({
     imports: [
@@ -20,6 +21,7 @@ import { QueryHistoryModule } from 'src/modules/query-history/query-history.modu
         StorageModule,
         AuthModule,
         QueryHistoryModule,
+        TenantsModule,
     ],
     providers: [
         EmbeddingService,

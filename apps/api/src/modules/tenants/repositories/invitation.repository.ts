@@ -129,6 +129,22 @@ export class InvitationRepository {
         return result[0];
     }
 
+    async findInviteByEmailAndTenant(
+        email: string,
+        tenantId: string
+    ): Promise<TenantInvitations | null> {
+        return await this.tenantInvRepo.findOne({
+            where: {
+                email: email,
+                tenantId: tenantId,
+                status: InvitationStatus.PENDING
+            },
+            order: {
+                expiresAt: 'DESC'
+            }
+        });
+    }
+
     async findInviteById(
         id: string,
     ): Promise<TenantInvitations | null> {

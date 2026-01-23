@@ -4,6 +4,7 @@ import { CreateTenantDto, CreateTenantResponseDto } from './dto/create-tenant.dt
 import { CurrentUser } from 'src/shared/decorators/current-user.decorator';
 import { Body } from '@nestjs/common';
 import { AuthGuard } from 'src/core/auth/guards/auth-guard';
+import { TenantGuard } from './guards/tenant-guard';
 import { plainToInstance } from 'class-transformer';
 import { TenantListItemResponseDto } from './dto/list-tenant.dto';
 import type { AuthUser } from 'src/shared/types/auth-user.type';
@@ -22,7 +23,7 @@ import { RevokeInviteParamDto } from './dto/revoke-invite-token';
     version: '1',
     path: 'workspace'
 })
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, TenantGuard)
 export class TenantsController {
 
     constructor(

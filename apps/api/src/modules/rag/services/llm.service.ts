@@ -49,6 +49,38 @@ export class LLMService {
     }
 
     /**
+     * Streams answer tokens from the LLM as they're generated
+     * @param question User's question
+     * @param context Relevant document chunks for context
+     * @returns Async generator yielding tokens and final metadata
+     */
+    async *streamAnswer(
+        question: string,
+        context: string[],
+    ): AsyncGenerator<
+        | { type: 'token'; token: string }
+        | { type: 'done'; response: LLMResponse },
+        void,
+        unknown
+    > {
+        try {
+            if (this.llm.provider === 'ollama') {
+                yield* this.streamAnswerOllama(question, context);
+            } else if (this.llm.provider === 'chutes-ai') {
+                yield* this.streamAnswerChutes(question, context);
+            } else if (this.llm.provider === 'openrouter') {
+                yield* this.streamAnswerOpenRouter(question, context);
+            } else {
+                throw new Error(`Unsupported LLM provider: ${this.llm.provider}`);
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.logger.error(`Failed to stream answer: ${errorMessage}`);
+            throw error;
+        }
+    }
+
+    /**
      * Generates answer using Ollama
      */
     private async generateAnswerOllama(question: string, context: string[]): Promise<LLMResponse> {
@@ -189,6 +221,432 @@ export class LLMService {
         if (v === 'medium') return 'Medium';
         if (v === 'low') return 'Low';
         return null;
+    }
+
+    /**
+     * Streams answer tokens from Ollama
+     */
+    private async *streamAnswerOllama(
+        question: string,
+        context: string[],
+    ): AsyncGenerator<
+        | { type: 'token'; token: string }
+        | { type: 'done'; response: LLMResponse },
+        void,
+        unknown
+    > {
+        const model = this.llm.model || 'llama3.2';
+        const baseUrl = this.llm.baseUrl || 'http://localhost:11434';
+        const temperature = this.llm.temperature || 0.3;
+        const maxTokens = Math.min(this.llm.maxTokens || 512, 512);
+
+        const contextText = context
+            .map((chunk, index) => `[${index + 1}] ${chunk}`)
+            .join('\n\n');
+
+        const prompt = `
+            You are answering a question using ONLY the provided context.
+
+            Rules:
+            - Do NOT introduce facts that are not present in the context.
+            - If the context does not directly answer the question, state this clearly.
+            - If the question requires comparison or judgment, you may reason logically
+              using the information in the context, but do not add external knowledge.
+            - Be concise, precise, and structured.
+            - Do NOT infer or reason beyond explicitly stated information.
+            - If the context does not explicitly answer the question, say:
+              "The document does not explicitly answer this question."
+            - If the document discusses multiple concepts related to the question,
+              compare them using only their described purpose and characteristics.
+            - Clearly state when the comparison is interpretative.
+
+            Context:
+            ${contextText}
+
+            Question:
+            ${question}
+
+            Answer in the following structured format:
+
+            Answer:
+            <Direct answer in 1–3 sentences>
+
+            Key points from context:
+            - <Bullet point 1>
+            - <Bullet point 2>
+            - <Bullet point 3 if applicable>
+
+            Reasoning:
+            <Explain how the answer was derived from the context.
+            If comparison is requested and the document does not explicitly compare,
+            explain the difference based on the described properties only.>
+
+            Confidence:
+            <High | Medium | Low>
+            (High = explicitly stated in context,
+             Medium = inferred from multiple parts of context,
+             Low = context is insufficient)
+        `;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        try {
+            const response = await fetch(`${baseUrl}/api/generate`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    model,
+                    prompt,
+                    stream: true,
+                    options: {
+                        temperature,
+                        num_predict: maxTokens,
+                    },
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Ollama API error: ${response.status} - ${errorText}`);
+            }
+
+            if (!response.body) {
+                throw new Error('No response body from Ollama');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullAnswer = '';
+            let modelName = model;
+            let promptEvalCount = 0;
+            let evalCount = 0;
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n').filter((line) => line.trim());
+
+                    for (const line of lines) {
+                        try {
+                            const data = JSON.parse(line);
+                            if (data.response) {
+                                fullAnswer += data.response;
+                                yield { type: 'token', token: data.response };
+                            }
+                            if (data.model) modelName = data.model;
+                            if (data.prompt_eval_count) promptEvalCount = data.prompt_eval_count;
+                            if (data.eval_count) evalCount = data.eval_count;
+                            if (data.done) break;
+                        } catch (e) {
+                            // Skip invalid JSON lines
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+
+            const confidence = this.parseConfidence(fullAnswer);
+            yield {
+                type: 'done',
+                response: {
+                    answer: fullAnswer,
+                    model: modelName,
+                    usage: evalCount
+                        ? {
+                              promptTokens: promptEvalCount,
+                              completionTokens: evalCount,
+                              totalTokens: promptEvalCount + evalCount,
+                          }
+                        : undefined,
+                    confidence: confidence ?? undefined,
+                },
+            };
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new Error('LLM generation timeout (15s exceeded)');
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Streams answer tokens from Chutes.ai (OpenAI-compatible streaming)
+     */
+    private async *streamAnswerChutes(
+        question: string,
+        context: string[],
+    ): AsyncGenerator<
+        | { type: 'token'; token: string }
+        | { type: 'done'; response: LLMResponse },
+        void,
+        unknown
+    > {
+        const apiKey = this.llm.apiKey;
+        const apiUrl = this.llm.chutesApiUrl || 'https://api.chutes.ai';
+        const model = this.llm.model;
+        const temperature = this.llm.temperature || 0.3;
+        const maxTokens = Math.min(this.llm.maxTokens || 512, 512);
+
+        if (!apiKey) {
+            throw new Error('Chutes.ai API key is required. Set CHUTES_AI_API_KEY environment variable.');
+        }
+
+        const contextText = context
+            .map((chunk, index) => `[${index + 1}] ${chunk}`)
+            .join('\n\n');
+
+        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
+
+Context:
+${contextText}
+
+Q: ${question}
+A:`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        try {
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+            };
+
+            if (apiKey.startsWith('Bearer ') || apiKey.startsWith('bearer ')) {
+                headers['Authorization'] = apiKey;
+            } else if (apiKey.startsWith('sk-') || apiKey.length > 20) {
+                headers['Authorization'] = `Bearer ${apiKey}`;
+            } else {
+                headers['X-API-Key'] = apiKey;
+            }
+
+            const response = await fetch(`${apiUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                        },
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    temperature,
+                    max_tokens: maxTokens,
+                    stream: true,
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Chutes.ai API error: ${response.status} - ${errorText}`);
+            }
+
+            if (!response.body) {
+                throw new Error('No response body from Chutes.ai');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullAnswer = '';
+            let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n').filter((line) => line.trim() && line.startsWith('data: '));
+
+                    for (const line of lines) {
+                        if (line === 'data: [DONE]') break;
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            const delta = data.choices?.[0]?.delta?.content;
+                            if (delta) {
+                                fullAnswer += delta;
+                                yield { type: 'token', token: delta };
+                            }
+                            if (data.usage) usage = data.usage;
+                        } catch (e) {
+                            // Skip invalid JSON
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+
+            yield {
+                type: 'done',
+                response: {
+                    answer: fullAnswer,
+                    model: model || 'unknown',
+                    usage: usage
+                        ? {
+                              promptTokens: usage.prompt_tokens,
+                              completionTokens: usage.completion_tokens,
+                              totalTokens: usage.total_tokens,
+                          }
+                        : undefined,
+                },
+            };
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new Error('LLM generation timeout (15s exceeded)');
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Streams answer tokens from OpenRouter (OpenAI-compatible streaming)
+     */
+    private async *streamAnswerOpenRouter(
+        question: string,
+        context: string[],
+    ): AsyncGenerator<
+        | { type: 'token'; token: string }
+        | { type: 'done'; response: LLMResponse },
+        void,
+        unknown
+    > {
+        const apiKey = this.llm.openrouterApiKey;
+        const apiUrl = this.llm.openrouterApiUrl || 'https://openrouter.ai/api/v1';
+        const model = this.llm.model;
+        const temperature = this.llm.temperature || 0.3;
+        const maxTokens = Math.min(this.llm.maxTokens || 512, 512);
+
+        if (!apiKey) {
+            throw new Error('OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.');
+        }
+
+        const contextText = context
+            .map((chunk, index) => `[${index + 1}] ${chunk}`)
+            .join('\n\n');
+
+        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
+
+Context:
+${contextText}
+
+Q: ${question}
+A:`;
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+        try {
+            const response = await fetch(`${apiUrl}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
+                    'HTTP-Referer': process.env.OPENROUTER_HTTP_REFERER || '',
+                    'X-Title': process.env.OPENROUTER_APP_NAME || 'DocSense',
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                        },
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    temperature,
+                    max_tokens: maxTokens,
+                    stream: true,
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+            }
+
+            if (!response.body) {
+                throw new Error('No response body from OpenRouter');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let fullAnswer = '';
+            let usage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+
+            try {
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n').filter((line) => line.trim() && line.startsWith('data: '));
+
+                    for (const line of lines) {
+                        if (line === 'data: [DONE]') break;
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            const delta = data.choices?.[0]?.delta?.content;
+                            if (delta) {
+                                fullAnswer += delta;
+                                yield { type: 'token', token: delta };
+                            }
+                            if (data.usage) usage = data.usage;
+                        } catch (e) {
+                            // Skip invalid JSON
+                        }
+                    }
+                }
+            } finally {
+                reader.releaseLock();
+            }
+
+            yield {
+                type: 'done',
+                response: {
+                    answer: fullAnswer,
+                    model: model || 'unknown',
+                    usage: usage
+                        ? {
+                              promptTokens: usage.prompt_tokens,
+                              completionTokens: usage.completion_tokens,
+                              totalTokens: usage.total_tokens,
+                          }
+                        : undefined,
+                },
+            };
+        } catch (error) {
+            clearTimeout(timeoutId);
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw new Error('LLM generation timeout (15s exceeded)');
+            }
+            throw error;
+        }
     }
 
     /**
