@@ -50,7 +50,9 @@ export class FilesController {
         @Query() query: ListFilesQueryDto
     ) {
         const tenantId = query.tenantId ?? user.tenantId;
-        return this.storageService.listFiles(user.id, tenantId, query.folderId);
+        const deleted = query.deleted ?? false;
+        // If only tenantId is passed (no folderId), listFiles will use root folder
+        return this.storageService.listFiles(user.id, tenantId, query.folderId, deleted);
     }
 
     @Get(":fileId")

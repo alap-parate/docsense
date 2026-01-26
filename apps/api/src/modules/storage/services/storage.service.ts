@@ -172,14 +172,59 @@ export class StorageService implements OnModuleInit {
         userId: string,
         tenantIdInput: string | undefined,
         parentId?: string | null,
+        deleted = false,
     ) {
         const tenantId = this.resolveTenantId(tenantIdInput);
         await this.ensureTenantAccess(userId, tenantId);
         const normalizedParentId = parentId ?? null;
-        const folders = await this.folderRepo.listByParentId(tenantId, normalizedParentId);
+        const folders = await this.folderRepo.listByParentId(tenantId, normalizedParentId, deleted);
         const childFolders = await this.folderRepo.listChildrenOfParents(
             tenantId,
             folders.map((f) => f.id),
+            deleted,
+        );
+
+        const childMap = new Map<string, { id: string; name: string }[]>();
+        for (const child of childFolders) {
+            const list = childMap.get(child.parentId ?? "") ?? [];
+            list.push({ id: child.id, name: child.name });
+            childMap.set(child.parentId ?? "", list);
+        }
+
+        return folders.map((folder) => {
+            const children = childMap.get(folder.id) ?? [];
+            return {
+                id: folder.id,
+                name: folder.name,
+                hasChildren: children.length > 0,
+                children,
+            };
+        });
+    }
+
+    async listFoldersInRoot(
+        userId: string,
+        tenantIdInput: string | undefined,
+        deleted = false,
+    ) {
+        const tenantId = this.resolveTenantId(tenantIdInput);
+        await this.ensureTenantAccess(userId, tenantId);
+        
+        // Get root folder (parentId is null)
+        const rootFolders = await this.folderRepo.listByParentId(tenantId, null, deleted);
+        if (rootFolders.length === 0) {
+            return [];
+        }
+        
+        // There should be only one root folder per tenant
+        const rootFolder = rootFolders[0];
+        
+        // List children of root folder (don't return root folder itself)
+        const folders = await this.folderRepo.listByParentId(tenantId, rootFolder.id, deleted);
+        const childFolders = await this.folderRepo.listChildrenOfParents(
+            tenantId,
+            folders.map((f) => f.id),
+            deleted,
         );
 
         const childMap = new Map<string, { id: string; name: string }[]>();
@@ -609,17 +654,28 @@ export class StorageService implements OnModuleInit {
     async listFiles(
         userId: string,
         tenantIdInput: string | undefined,
-        folderId: string,
+        folderId?: string,
+        deleted = false,
     ) {
         const tenantId = this.resolveTenantId(tenantIdInput);
         await this.ensureTenantAccess(userId, tenantId);
 
-        const folder = await this.folderRepo.findById(tenantId, folderId);
+        // If folderId is not provided, use root folder
+        let targetFolderId = folderId;
+        if (!targetFolderId) {
+            const rootFolders = await this.folderRepo.listByParentId(tenantId, null, deleted);
+            if (rootFolders.length === 0) {
+                return [];
+            }
+            targetFolderId = rootFolders[0].id;
+        }
+
+        const folder = await this.folderRepo.findById(tenantId, targetFolderId, deleted);
         if (!folder) {
             throw new NotFoundException("Folder not found");
         }
 
-        const files = await this.fileRepo.listByFolderId(tenantId, folderId);
+        const files = await this.fileRepo.listByFolderId(tenantId, targetFolderId, deleted);
         const pageCounts = await this.getPageCounts(tenantId, files.map((f) => f.id));
 
         return files.map((file) => ({
@@ -883,15 +939,30 @@ export class StorageService implements OnModuleInit {
             withDeleted: true,
         });
 
+        // Build a set of deleted folder IDs
+        const deletedFolderIds = new Set(deletedFolders.map((f) => f.id));
+
+        // Only show "root" deleted folders - those whose parent is NOT also deleted
+        // If parent folder is deleted, this folder was deleted as cascade - only show the parent
+        const topLevelDeletedFolders = deletedFolders.filter(
+            (folder) => !folder.parentId || !deletedFolderIds.has(folder.parentId)
+        );
+
+        // Only show files whose parent folder is NOT deleted
+        // If parent folder is deleted, the file was deleted as cascade - only show the folder
+        const directlyDeletedFiles = deletedFiles.filter(
+            (file) => !deletedFolderIds.has(file.folderId)
+        );
+
         const items = [
-            ...deletedFolders.map((folder) => ({
+            ...topLevelDeletedFolders.map((folder) => ({
                 id: folder.id,
                 type: "FOLDER" as const,
                 name: folder.name,
                 originalParentId: folder.parentId ?? null,
                 recycledAt: folder.deletedAt ?? folder.updatedAt ?? folder.createdAt,
             })),
-            ...deletedFiles.map((file) => ({
+            ...directlyDeletedFiles.map((file) => ({
                 id: file.id,
                 type: "FILE" as const,
                 name: file.name,

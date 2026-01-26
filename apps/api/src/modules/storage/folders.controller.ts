@@ -43,10 +43,16 @@ export class FoldersController {
         @Query() query: ListFolderQueryDto
     ) {
         const tenantId = query.tenantId ?? user.tenantId;
+        const deleted = query.deleted ?? false;
+        // If only tenantId is passed (no parentId), list folders inside root folder
+        if (query.parentId === undefined) {
+            return this.storageService.listFoldersInRoot(user.id, tenantId, deleted);
+        }
         return this.storageService.listFolders(
             user.id,
             tenantId,
-            query.parentId ?? null
+            query.parentId ?? null,
+            deleted
         );
     }
 

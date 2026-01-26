@@ -1,6 +1,7 @@
-import { Expose } from "class-transformer";
+import { Expose, Transform } from "class-transformer";
 import {
     IsArray,
+    IsBoolean,
     IsEnum,
     IsNotEmpty,
     IsNumber,
@@ -44,12 +45,18 @@ export class UploadRequestResponseDto {
 }
 
 export class ListFilesQueryDto {
+    @IsOptional()
     @IsUUID()
-    folderId!: string;
+    folderId?: string;
 
     @IsOptional()
     @IsUUID()
     tenantId?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    deleted?: boolean;
 }
 
 export class TenantQueryDto {

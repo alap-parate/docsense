@@ -39,8 +39,21 @@ export class FileRepository {
 
     async listByFolderId(
         tenantId: string,
-        folderId: string
+        folderId: string,
+        withDeleted = false
     ): Promise<Files[]> {
+        if (withDeleted) {
+            return this.fileRepo.find({
+                where: {
+                    tenantId,
+                    folderId,
+                },
+                withDeleted: true,
+                order: {
+                    createdAt: "DESC",
+                },
+            });
+        }
         return this.fileRepo.find({
             where: {
                 tenantId,

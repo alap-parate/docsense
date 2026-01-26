@@ -1,6 +1,7 @@
-import { Expose } from "class-transformer";
+import { Expose, Transform } from "class-transformer";
 import {
     IsArray,
+    IsBoolean,
     IsNotEmpty,
     IsOptional,
     IsString,
@@ -39,6 +40,11 @@ export class ListFolderQueryDto {
     @IsOptional()
     @IsUUID()
     tenantId?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => value === 'true' || value === true)
+    deleted?: boolean;
 }
 
 export class FolderListItemDto {

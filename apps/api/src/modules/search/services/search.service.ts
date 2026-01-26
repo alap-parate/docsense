@@ -41,10 +41,15 @@ export class SearchService {
         }
 
         try {
-            // Build Elasticsearch query
+            // Build Elasticsearch query with phrase matching prioritized
+            // First try to match phrases, then fall back to individual words
+            const queryTerms = q.trim().split(/\s+/).filter(term => term.length > 0);
+            const hasMultipleTerms = queryTerms.length > 1;
+            
             const esQuery: any = {
                 bool: {
                     must: [
+                        // All terms must match (required)
                         {
                             match: {
                                 content: {
@@ -54,7 +59,18 @@ export class SearchService {
                                 }
                             }
                         }
-                    ]
+                    ],
+                    should: [
+                        // Phrase match (boost) - matches exact phrase for higher scoring
+                        ...(hasMultipleTerms ? [{
+                            match_phrase: {
+                                content: {
+                                    query: q,
+                                    boost: 3.0, // Higher boost for phrase matches
+                                }
+                            }
+                        }] : [])
+                    ],
                 }
             };
 
@@ -88,9 +104,12 @@ export class SearchService {
                             fragment_size: 200,
                             number_of_fragments: 3,
                             pre_tags: ['<mark>'],
-                            post_tags: ['</mark>']
+                            post_tags: ['</mark>'],
+                            type: 'unified', // Better phrase highlighting
+                            phrase_limit: 50, // Limit phrase matches for performance
                         }
-                    }
+                    },
+                    require_field_match: false, // Highlight even if phrase doesn't match exactly
                 },
                 size: limit,
                 from: offset,

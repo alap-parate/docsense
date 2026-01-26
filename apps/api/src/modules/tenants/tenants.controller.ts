@@ -184,4 +184,23 @@ export class TenantsController {
         return data;
     }
 
+    // List invitations for a tenant
+    @Get(':tenantId/invitations')
+    @HttpCode(HttpStatus.OK)
+    async listInvitations(
+        @Param() params: TenantIdParamDto,
+        @Query() query: PaginationQueryDto
+    ) {
+        const response = await this.inviteService.listInvitations(
+            params.tenantId,
+            query.page,
+            query.limit,
+            query.offset
+        );
+        return {
+            invitations: response.invitations,
+            pagination: response.pagination
+        };
+    }
+
 }

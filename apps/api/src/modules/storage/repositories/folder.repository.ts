@@ -23,8 +23,22 @@ export class FolderRepository {
 
     async listByParentId(
         tenantId: string,
-        parentId: string | null
+        parentId: string | null,
+        withDeleted = false
     ): Promise<Folders[]> {
+        if (withDeleted) {
+            // When browsing deleted items, show folders with deletedAt set
+            return this.folderRepo.find({
+                where: {
+                    tenantId,
+                    parentId: parentId ?? IsNull(),
+                },
+                withDeleted: true,
+                order: {
+                    createdAt: "ASC",
+                },
+            });
+        }
         return this.folderRepo.find({
             where: {
                 tenantId,
@@ -39,10 +53,23 @@ export class FolderRepository {
 
     async listChildrenOfParents(
         tenantId: string,
-        parentIds: string[]
+        parentIds: string[],
+        withDeleted = false
     ): Promise<Folders[]> {
         if (parentIds.length === 0) {
             return [];
+        }
+        if (withDeleted) {
+            return this.folderRepo.find({
+                where: {
+                    tenantId,
+                    parentId: In(parentIds),
+                },
+                withDeleted: true,
+                order: {
+                    createdAt: "ASC",
+                },
+            });
         }
         return this.folderRepo.find({
             where: {

@@ -120,8 +120,29 @@ export class RAGService {
         });
         const fileMap = new Map(files.map(f => [f.id, f]));
 
+        // Filter out results for deleted files (files not found in DB due to soft delete)
+        const validSearchResults = searchResults.filter(r => fileMap.has(r.fileId));
+
+        if (validSearchResults.length === 0) {
+            const totalTimeMs = Date.now() - startTime;
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: question,
+                queryMode,
+                totalChunksRetrieved: 0,
+                totalTimeMs,
+                documentsUsed: [],
+            });
+            return {
+                answer: "I couldn't find any relevant information in the documents to answer your question.",
+                sources: [],
+                model: 'none',
+            };
+        }
+
         const maxChunkLength = 500;
-        const contextChunks = searchResults
+        const contextChunks = validSearchResults
             .slice(0, effectiveTopK)
             .map(result => {
                 const content = result.content;
@@ -131,11 +152,11 @@ export class RAGService {
             })
             .filter(Boolean);
 
-        const sources = searchResults.map(result => {
-            const file = fileMap.get(result.fileId);
+        const sources = validSearchResults.map(result => {
+            const file = fileMap.get(result.fileId)!;
             return {
                 fileId: result.fileId,
-                fileName: file?.name || file?.originalName || 'Unknown',
+                fileName: file.name || file.originalName || 'Unknown',
                 pageNumber: result.pageNumber,
                 chunkIndex: result.chunkIndex || 0,
                 snippet: result.content.substring(0, 200) + '...',
@@ -147,7 +168,7 @@ export class RAGService {
         const llmResponse = await this.llmService.generateAnswer(question, contextChunks);
 
         const totalTimeMs = Date.now() - startTime;
-        const topScores = searchResults.slice(0, effectiveTopK).map(r => r.score);
+        const topScores = validSearchResults.slice(0, effectiveTopK).map(r => r.score);
         const rerankScore = topScores.length
             ? topScores.reduce((a, b) => a + b, 0) / topScores.length
             : null;
@@ -165,7 +186,7 @@ export class RAGService {
             query: question,
             queryMode,
             confidence: llmResponse.confidence ?? null,
-            totalChunksRetrieved: searchResults.length,
+            totalChunksRetrieved: validSearchResults.length,
             rerankScore,
             totalTimeMs,
             documentsUsed,
@@ -259,8 +280,27 @@ export class RAGService {
         });
         const fileMap = new Map(files.map(f => [f.id, f]));
 
+        // Filter out results for deleted files (files not found in DB due to soft delete)
+        const validSearchResults = searchResults.filter(r => fileMap.has(r.fileId));
+
+        if (validSearchResults.length === 0) {
+            const totalTimeMs = Date.now() - startTime;
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: question,
+                queryMode,
+                totalChunksRetrieved: 0,
+                totalTimeMs,
+                documentsUsed: [],
+            });
+            yield { type: 'token', token: "I couldn't find any relevant information in the documents to answer your question." };
+            yield { type: 'done', metadata: { model: 'none' } };
+            return;
+        }
+
         const maxChunkLength = 500;
-        const contextChunks = searchResults
+        const contextChunks = validSearchResults
             .slice(0, effectiveTopK)
             .map(result => {
                 const content = result.content;
@@ -270,11 +310,11 @@ export class RAGService {
             })
             .filter(Boolean);
 
-        const sources = searchResults.map(result => {
-            const file = fileMap.get(result.fileId);
+        const sources = validSearchResults.map(result => {
+            const file = fileMap.get(result.fileId)!;
             return {
                 fileId: result.fileId,
-                fileName: file?.name || file?.originalName || 'Unknown',
+                fileName: file.name || file.originalName || 'Unknown',
                 pageNumber: result.pageNumber,
                 chunkIndex: result.chunkIndex || 0,
                 snippet: result.content.substring(0, 200) + '...',
@@ -305,7 +345,7 @@ export class RAGService {
         // Log query history after streaming completes (fire-and-forget)
         if (finalResponse) {
             const totalTimeMs = Date.now() - startTime;
-            const topScores = searchResults.slice(0, effectiveTopK).map(r => r.score);
+            const topScores = validSearchResults.slice(0, effectiveTopK).map(r => r.score);
             const rerankScore = topScores.length
                 ? topScores.reduce((a, b) => a + b, 0) / topScores.length
                 : null;
@@ -323,7 +363,7 @@ export class RAGService {
                 query: question,
                 queryMode,
                 confidence: finalResponse.confidence ?? null,
-                totalChunksRetrieved: searchResults.length,
+                totalChunksRetrieved: validSearchResults.length,
                 rerankScore,
                 totalTimeMs,
                 documentsUsed,

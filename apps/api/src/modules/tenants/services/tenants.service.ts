@@ -48,11 +48,15 @@ export class TenantService {
         offset: number
     ) {
         const [tenant, total] = await this.tenantRepo.findTenantByUserId(userId, limit, offset);
+        console.log(tenant);
 
         return {
             workspace: tenant.map(t => ({
                 id: t.tenant.id,
                 name: t.tenant.name,
+                createdAt: t.tenant.createdAt,
+                createdBy: t.tenant.createdBy.fname + " " + t.tenant.createdBy.lname,
+                createdByMail: t.tenant.createdBy.email,
             })),
             pagination: {
                 page,
@@ -110,6 +114,7 @@ export class TenantService {
             throw new NotFoundException('User not found in workspace');
         }
 
+        // Uncomment this to prevent removing yourself from the workspace if not owner
         if(actorId === targetUserId) {
             throw new BadRequestException('Cannot remove yourself');
         }

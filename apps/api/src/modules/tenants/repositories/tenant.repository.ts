@@ -73,7 +73,7 @@ export class TenantRepository {
             order: { 
                 createdAt: 'DESC'
             },
-            relations: ['tenant']
+            relations: ['tenant.createdBy']
         })
     };
 

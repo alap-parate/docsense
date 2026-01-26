@@ -9,4 +9,13 @@ export class TenantListItemResponseDto {
     @Expose()
     name!: string;
 
+    @Expose()
+    createdAt!: Date;
+
+    @Expose()
+    createdBy!: string;
+
+    @Expose()
+    createdByMail!: string;
+
 }

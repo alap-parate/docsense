@@ -88,26 +88,25 @@ export class InvitationRepository {
 
     async listInvitationByTenant(
         tenantId: string,
-        page: number,
-        limit: number
+        limit: number = 10,
+        offset: number = 0
     ): Promise<TenantInvitations[] | null> {
         return this.tenantInvRepo.find({
             where: {
-                tenantId: tenantId
+                tenantId: tenantId,
+                status: InvitationStatus.PENDING
             },
+            relations: ['createdBy'],
             select: {
                 id: true,
                 email: true,
-                createdBy: {
-                    id: true,
-                    email: true,
-                }
+                invitedAt: true,
             },
             order: {
                 invitedAt: "DESC"
             },
-            skip: (page - 1 * limit),
             take: limit,
+            skip: offset,
         })
     }
 
@@ -143,6 +142,45 @@ export class InvitationRepository {
                 expiresAt: 'DESC'
             }
         });
+    }
+
+    async findAnyInviteByEmailAndTenant(
+        email: string,
+        tenantId: string
+    ): Promise<TenantInvitations | null> {
+        return await this.tenantInvRepo.findOne({
+            where: { email, tenantId },
+            order: { invitedAt: 'DESC' }
+        });
+    }
+
+    async reinviteUser(
+        existingId: string,
+        inviterUserId: string,
+        targetUserId: string,
+        tenantId: string,
+        email: string,
+        role: TenantRole,
+        tokenHash: string,
+        expiresAt: Date,
+        invitedAt: Date,
+    ): Promise<TenantInvitations> {
+        const result = await this.tenantInvRepo
+            .createQueryBuilder()
+            .update(TenantInvitations)
+            .set({
+                userId: targetUserId,
+                role,
+                tokenHash,
+                status: InvitationStatus.PENDING,
+                expiresAt,
+                invitedAt,
+                updatedById: inviterUserId,
+            })
+            .where('id = :id', { id: existingId })
+            .returning('*')
+            .execute();
+        return result.raw[0];
     }
 
     async findInviteById(

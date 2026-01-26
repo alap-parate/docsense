@@ -6,6 +6,7 @@ import { generateHash } from 'src/shared/utils/crypto';
 import inviteConfig from 'src/core/config/configuration/inviteConfig';
 import type { ConfigType } from '@nestjs/config';
 import ms from 'ms';
+import { randomUUID } from 'crypto';
 import { DataSource } from 'typeorm';
 import { TenantRepository } from '../repositories/tenant.repository';
 import { MembershipStatus } from '../constants/membership-status.enum';
@@ -20,7 +21,7 @@ export class InvitationService {
     constructor(
         private readonly invRepo: InvitationRepository,
         private readonly userRepo: UserRepository,
-        private readonly tenantUserRepo: TenantRepository, 
+        private readonly tenantUserRepo: TenantRepository,
         @Inject(inviteConfig.KEY)
         private readonly invConfig: ConfigType<typeof inviteConfig>,
         private readonly dataSource: DataSource,
@@ -81,17 +82,35 @@ export class InvitationService {
             throw new ConflictException('User is already an active member of this tenant');
         }
 
-        // Check if this email already has a pending (non-expired) invitation for this tenant
-        // Use email+tenantId because the unique constraint is on (tenantId, email)
-        const existingInvite = await this.invRepo.findInviteByEmailAndTenant(email, tenantId);
+        // Check for any existing invitation (tenantId + email) regardless of status
+        const existingInvite = await this.invRepo.findAnyInviteByEmailAndTenant(email, tenantId);
         if (existingInvite) {
-            // If invite exists and hasn't expired, it's still pending
-            if (!existingInvite.expiresAt || existingInvite.expiresAt >= new Date()) {
+            const isPendingAndNotExpired =
+                existingInvite.status === InvitationStatus.PENDING &&
+                (existingInvite.expiresAt == null || existingInvite.expiresAt >= new Date());
+            if (isPendingAndNotExpired) {
                 throw new ConflictException('This email already has a pending invitation for this tenant');
             }
+            // REVOKED, EXPIRED, or PENDING+expired: re-invite by updating the existing row
+            const token = `${tenantId}:${user.id}:${randomUUID()}`;
+            const tokenHash = generateHash(token, this.inviteTokenSecert);
+            const expiry = new Date(Date.now() + ms(this.inviteTokenExpiry));
+            const invitedAt = new Date();
+            return await this.invRepo.reinviteUser(
+                existingInvite.id,
+                inviterId,
+                user.id,
+                tenantId,
+                email,
+                role,
+                tokenHash,
+                expiry,
+                invitedAt,
+            );
         }
 
-        const token = `${tenantId}:${user.id}`;
+        const token = `${tenantId}:${user.id}:${randomUUID()}`;
+        console.log("Invite Token: ",token);
         const tokenHash = generateHash(token, this.inviteTokenSecert);
         const expiry = new Date(Date.now() + ms(this.inviteTokenExpiry));
         const response = await this.invRepo.inviteUser(
@@ -113,47 +132,70 @@ export class InvitationService {
     }
 
     async acceptInvite(rawToken: string) {
-        // hash the raw token 
         const tokenHash = generateHash(rawToken, this.inviteTokenSecert);
-
-        // search in db for validity
         const invite = await this.invRepo.findInvitationByHash(tokenHash);
 
-        if(!invite) {
-            throw new NotFoundException('Invalid invite')
+        if (!invite) {
+            throw new NotFoundException('Invalid invite');
         }
 
-        if(invite?.status && invite.status == InvitationStatus.REVOKED) {
-            throw new GoneException('Invitation has been revoked')
+        if (invite.status === InvitationStatus.REVOKED) {
+            throw new GoneException('Invitation has been revoked');
         }
-        console.log(invite?.expiresAt);
-        console.log(new Date());
-        if(invite?.expiresAt && invite.expiresAt < new Date()) {
-            await this.invRepo.expireToken(tokenHash)
-            throw new GoneException('Invitation is expired')
+
+        if (invite.status === InvitationStatus.ACCEPTED) {
+            throw new ConflictException('Invitation has already been accepted');
+        }
+
+        const now = new Date();
+        if (invite.expiresAt && invite.expiresAt < now) {
+            await this.invRepo.expireToken(tokenHash);
+            throw new GoneException('Invitation is expired');
         }
 
         await this.dataSource.transaction(async (manager) => {
             await this.invRepo.acceptInvitation(invite.id, invite.userId, manager);
-            await this.tenantUserRepo.assignUser(invite.tenantId, invite.userId, invite.role, MembershipStatus.ACTIVE)
-        })
+            await this.tenantUserRepo.assignUser(
+                invite.tenantId,
+                invite.userId,
+                invite.role,
+                MembershipStatus.ACTIVE,
+            );
+        });
 
         return {
             userId: invite.userId,
             role: invite.role,
-        }
+        };
     }
 
     async revokeInvitation(id: string, userId: string) {
 
         const invite = await this.invRepo.findInviteById(id);
-        if(!invite) {
+        if (!invite) {
             throw new NotFoundException('Invite not found')
         }
-        if(invite?.createdById != userId) {
+        if (invite?.createdById != userId) {
             throw new ForbiddenException('You are not allowed to revoke this invitation')
         }
         return await this.invRepo.revokeInvitation(id, userId)
+    }
+
+    async listInvitations(tenantId: string, page: number, limit: number, offset: number) {
+        const invitations = await this.invRepo.listInvitationByTenant(tenantId, limit, offset);
+        return {
+            invitations: (invitations ?? []).map((invitation) => ({
+                id: invitation.id,
+                email: invitation.email,
+                createdBy: invitation.createdBy.fname + ' ' + invitation.createdBy.lname,
+                createdByMail: invitation.createdBy.email,
+            })),
+            pagination: {
+                page,
+                limit,
+                total: (invitations ?? []).length,
+            },
+        };
     }
 
 }
