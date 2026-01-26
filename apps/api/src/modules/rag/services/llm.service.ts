@@ -18,11 +18,39 @@ export interface LLMResponse {
 @Injectable()
 export class LLMService {
     private readonly logger = new Logger(LLMService.name);
+    private readonly contextOnlySystemMessage =
+        'You must answer using ONLY the provided context. Do NOT use external knowledge. If the context does not explicitly answer the question, respond exactly: "The document does not explicitly answer this question."';
 
     constructor(
         @Inject(llmConfig.KEY)
         private readonly llm: ConfigType<typeof llmConfig>
     ) { }
+
+    private buildContextOnlyPrompt(context: string[], question: string): string {
+        const contextText = context
+            .map((chunk, index) => `[${index + 1}] ${chunk}`)
+            .join('\n\n');
+
+        return `You must answer using ONLY the provided context.
+
+Rules:
+- Do NOT introduce facts that are not present in the context.
+- Do NOT use any external knowledge.
+- If the question is broad (e.g. "what is X", "tell me about X"),
+  provide a concise definition or summary using ONLY statements found in the context.
+- If the context does not explicitly mention the subject, respond exactly:
+  "The document does not explicitly answer this question."
+- If you reference facts, ensure they appear in the context.
+- If something related to maths or expression pop up in the context, provide the answer in proper formatting using html tags.
+
+Context:
+${contextText}
+
+Question:
+${question}
+
+Answer:`;
+    }
 
     /**
      * Generates an answer using the LLM with provided context
@@ -89,63 +117,52 @@ export class LLMService {
         const temperature = this.llm.temperature || 0.3; // Lower temperature for faster, more focused responses
         const maxTokens = Math.min(this.llm.maxTokens || 512, 512); // Limit tokens for faster generation
 
-        // Build context from retrieved chunks (optimized, shorter format)
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
-        // Create shorter, more efficient prompt for RAG
-        // const prompt = `Answer based on context only. If context doesn't have the answer, say so.
+        // const prompt = `
+        //     You are answering a question using ONLY the provided context.
 
-        //                 Context:
-        //                 ${contextText}
+        //     Rules:
+        //     - Do NOT introduce facts that are not present in the context.
+        //     - If the context does not directly answer the question, state this clearly.
+        //     - If the question requires comparison or judgment, you may reason logically
+        //       using the information in the context, but do not add external knowledge.
+        //     - Be concise, precise, and structured.
+        //     - Do NOT infer or reason beyond explicitly stated information.
+        //     - If the context does not explicitly answer the question, say:
+        //       "The document does not explicitly answer this question."
+        //     - If the document discusses multiple concepts related to the question,
+        //       compare them using only their described purpose and characteristics.
+        //     - Clearly state when the comparison is interpretative.
+        //     - Strictly follow the context and do not add any external knowledge.
 
-        //                 Q: ${question}
-        //                 A:`;
+        //     Context:
+        //     ${contextText}
 
-        const prompt = `
-            You are answering a question using ONLY the provided context.
+        //     Question:
+        //     ${question}
 
-            Rules:
-            - Do NOT introduce facts that are not present in the context.
-            - If the context does not directly answer the question, state this clearly.
-            - If the question requires comparison or judgment, you may reason logically
-              using the information in the context, but do not add external knowledge.
-            - Be concise, precise, and structured.
-            - Do NOT infer or reason beyond explicitly stated information.
-            - If the context does not explicitly answer the question, say:
-              "The document does not explicitly answer this question."
-            - If the document discusses multiple concepts related to the question,
-              compare them using only their described purpose and characteristics.
-            - Clearly state when the comparison is interpretative.
+        //     Answer in the following structured format:
 
-            Context:
-            ${contextText}
+        //     Answer:
+        //     <Direct answer in 1–3 sentences>
 
-            Question:
-            ${question}
+        //     Key points from context:
+        //     - <Bullet point 1>
+        //     - <Bullet point 2>
+        //     - <Bullet point 3 if applicable>
 
-            Answer in the following structured format:
+        //     Reasoning:
+        //     <Explain how the answer was derived from the context.
+        //     If comparison is requested and the document does not explicitly compare,
+        //     explain the difference based on the described properties only.>
 
-            Answer:
-            <Direct answer in 1–3 sentences>
-
-            Key points from context:
-            - <Bullet point 1>
-            - <Bullet point 2>
-            - <Bullet point 3 if applicable>
-
-            Reasoning:
-            <Explain how the answer was derived from the context.
-            If comparison is requested and the document does not explicitly compare,
-            explain the difference based on the described properties only.>
-
-            Confidence:
-            <High | Medium | Low>
-            (High = explicitly stated in context,
-             Medium = inferred from multiple parts of context,
-             Low = context is insufficient)
-        `;
+        //     Confidence:
+        //     <High | Medium | Low>
+        //     (High = explicitly stated in context,
+        //      Medium = inferred from multiple parts of context,
+        //      Low = context is insufficient)
+        // `;
 
         // const prompt = `
         //     You are answering based on provided context.
@@ -240,53 +257,7 @@ export class LLMService {
         const temperature = this.llm.temperature || 0.3;
         const maxTokens = Math.min(this.llm.maxTokens || 512, 512);
 
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
-
-        const prompt = `
-            You are answering a question using ONLY the provided context.
-
-            Rules:
-            - Do NOT introduce facts that are not present in the context.
-            - If the context does not directly answer the question, state this clearly.
-            - If the question requires comparison or judgment, you may reason logically
-              using the information in the context, but do not add external knowledge.
-            - Be concise, precise, and structured.
-            - Do NOT infer or reason beyond explicitly stated information.
-            - If the context does not explicitly answer the question, say:
-              "The document does not explicitly answer this question."
-            - If the document discusses multiple concepts related to the question,
-              compare them using only their described purpose and characteristics.
-            - Clearly state when the comparison is interpretative.
-
-            Context:
-            ${contextText}
-
-            Question:
-            ${question}
-
-            Answer in the following structured format:
-
-            Answer:
-            <Direct answer in 1–3 sentences>
-
-            Key points from context:
-            - <Bullet point 1>
-            - <Bullet point 2>
-            - <Bullet point 3 if applicable>
-
-            Reasoning:
-            <Explain how the answer was derived from the context.
-            If comparison is requested and the document does not explicitly compare,
-            explain the difference based on the described properties only.>
-
-            Confidence:
-            <High | Medium | Low>
-            (High = explicitly stated in context,
-             Medium = inferred from multiple parts of context,
-             Low = context is insufficient)
-        `;
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -402,17 +373,7 @@ export class LLMService {
             throw new Error('Chutes.ai API key is required. Set CHUTES_AI_API_KEY environment variable.');
         }
 
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
-
-        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
-
-Context:
-${contextText}
-
-Q: ${question}
-A:`;
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -438,7 +399,7 @@ A:`;
                     messages: [
                         {
                             role: 'system',
-                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                            content: this.contextOnlySystemMessage
                         },
                         {
                             role: 'user',
@@ -540,17 +501,7 @@ A:`;
             throw new Error('OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.');
         }
 
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
-
-        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
-
-Context:
-${contextText}
-
-Q: ${question}
-A:`;
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -569,7 +520,7 @@ A:`;
                     messages: [
                         {
                             role: 'system',
-                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                            content: this.contextOnlySystemMessage
                         },
                         {
                             role: 'user',
@@ -663,19 +614,7 @@ A:`;
             throw new Error('Chutes.ai API key is required. Set CHUTES_AI_API_KEY environment variable.');
         }
 
-        // Build context from retrieved chunks
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
-
-        // Create prompt for RAG
-        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
-
-Context:
-${contextText}
-
-Q: ${question}
-A:`;
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
         // Add timeout (15 seconds max for LLM)
         const controller = new AbortController();
@@ -707,7 +646,7 @@ A:`;
                     messages: [
                         {
                             role: 'system',
-                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                            content: this.contextOnlySystemMessage
                         },
                         {
                             role: 'user',
@@ -766,19 +705,7 @@ A:`;
             throw new Error('OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.');
         }
 
-        // Build context from retrieved chunks
-        const contextText = context
-            .map((chunk, index) => `[${index + 1}] ${chunk}`)
-            .join('\n\n');
-
-        // Create prompt for RAG
-        const prompt = `Answer based on context only. If context doesn't have the answer, say so.
-
-Context:
-${contextText}
-
-Q: ${question}
-A:`;
+        const prompt = this.buildContextOnlyPrompt(context, question);
 
         // Add timeout (15 seconds max for LLM)
         const controller = new AbortController();
@@ -798,7 +725,7 @@ A:`;
                     messages: [
                         {
                             role: 'system',
-                            content: 'You are a helpful assistant that answers questions based on the provided context from PDF documents. Use only the information from the context to answer the question. If the context doesn\'t contain enough information to answer the question, say so.'
+                            content: this.contextOnlySystemMessage
                         },
                         {
                             role: 'user',

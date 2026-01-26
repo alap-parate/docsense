@@ -24,7 +24,22 @@ export class QueryHistoryController {
             offset,
         );
         return {
-            data,
+            data: data.map((item) => ({
+                id: item.id,
+                tenantId: item.tenantId,
+                tenantName: item.tenant?.name ?? null,
+                query: item.query,
+                response: item.response ?? null,
+                aborted: item.aborted ?? false,
+                queryMode: item.queryMode,
+                confidence: item.confidence,
+                totalChunksRetrieved: item.totalChunksRetrieved,
+                rerankScore: item.rerankScore,
+                totalTimeMs: item.totalTimeMs,
+                documentsUsed: item.documentsUsed,
+                citations: item.citations,
+                createdAt: item.createdAt,
+            })),
             pagination: {
                 page: query.page,
                 limit,

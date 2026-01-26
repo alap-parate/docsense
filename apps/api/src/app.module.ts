@@ -16,6 +16,7 @@ import { ElasticModule } from './core/elastic/elastic.module';
 import { SearchModule } from './modules/search/search.module';
 import { RAGModule } from './modules/rag/rag.module';
 import { QueryHistoryModule } from './modules/query-history/query-history.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { QueryHistoryModule } from './modules/query-history/query-history.module
     SearchModule,
     RAGModule,
     QueryHistoryModule,
+    DashboardModule,
   ],
   providers: [],
 })

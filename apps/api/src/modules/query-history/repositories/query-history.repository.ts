@@ -16,6 +16,8 @@ export class QueryHistoryRepository {
             tenantId: payload.tenantId,
             userId: payload.userId,
             query: payload.query,
+            response: payload.response ?? null,
+            aborted: payload.aborted ?? false,
             queryMode: payload.queryMode,
             confidence: payload.confidence ?? null,
             totalChunksRetrieved: payload.totalChunksRetrieved,
@@ -36,6 +38,7 @@ export class QueryHistoryRepository {
             order: { createdAt: 'DESC' },
             take: limit,
             skip: offset,
+            relations: ['tenant'],
         });
         return { rows, total };
     }

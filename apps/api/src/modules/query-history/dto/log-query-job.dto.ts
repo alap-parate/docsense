@@ -5,6 +5,8 @@ export interface LogQueryJobPayload {
     tenantId: string;
     userId: string;
     query: string;
+    response?: string | null;
+    aborted?: boolean;
     queryMode: QueryMode;
     confidence?: string | null;
     totalChunksRetrieved: number;

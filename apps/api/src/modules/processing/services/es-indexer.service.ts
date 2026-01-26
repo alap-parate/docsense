@@ -40,8 +40,8 @@ export class EsIndexerService {
             const chunks = this.chunkingService.splitIntoChunks(
                 page.text,
                 page.pageNumber,
-                1000, // chunk size
-                200   // overlap
+                600, // chunk size (smaller improves semantic precision)
+                120   // overlap
             );
 
             for (const chunk of chunks) {

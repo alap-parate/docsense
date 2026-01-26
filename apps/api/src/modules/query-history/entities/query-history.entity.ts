@@ -1,6 +1,7 @@
 import { BaseEntity } from "src/core/database/entities/base.entity";
-import { Entity, Column } from "typeorm";
+import { Entity, Column, JoinColumn, ManyToOne } from "typeorm";
 import { QueryMode } from "../constants/query-mode.enum";
+import { Tenants } from "src/modules/tenants/entities/tenants.entity";
 
 export interface DocumentUsed {
     fileId: string;
@@ -27,8 +28,18 @@ export class QueryHistory extends BaseEntity {
     @Column({ name: 'user_id', type: 'uuid' })
     userId!: string;
 
+    @ManyToOne(() => Tenants, { nullable: false })
+    @JoinColumn({ name: 'tenant_id' })
+    tenant!: Tenants;
+
     @Column({ name: 'query', type: 'text' })
     query!: string;
+
+    @Column({ name: 'response', type: 'text', nullable: true })
+    response!: string | null;
+
+    @Column({ name: 'aborted', type: 'boolean', default: false })
+    aborted!: boolean;
 
     @Column({
         name: 'query_mode',

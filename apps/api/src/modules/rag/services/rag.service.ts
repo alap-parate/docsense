@@ -38,6 +38,11 @@ export interface RAGResponse {
 @Injectable()
 export class RAGService {
     private readonly logger = new Logger(RAGService.name);
+    private readonly minKeywordTopScore = 0.2;
+    private readonly minKeywordAvgScore = 0.15;
+    private readonly minHybridTopScore = 0.01;
+    private readonly minHybridAvgScore = 0.008;
+    private readonly maxChunksPerFile = 2;
 
     constructor(
         private readonly es: ElasticsearchService,
@@ -47,6 +52,36 @@ export class RAGService {
         private readonly filesRepo: Repository<Files>,
         private readonly queryHistoryService: QueryHistoryService,
     ) {}
+
+    private isBelowRelevanceThreshold(results: Array<{ score: number }>, queryMode: QueryMode): boolean {
+        if (results.length === 0) return true;
+        const scores = results.map(r => r.score);
+        const topScore = Math.max(...scores);
+        const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+
+        if (queryMode === QueryMode.HYBRID) {
+            return topScore < this.minHybridTopScore || avgScore < this.minHybridAvgScore;
+        }
+        return topScore < this.minKeywordTopScore || avgScore < this.minKeywordAvgScore;
+    }
+
+    private selectTopResults<T extends { score: number; fileId: string }>(
+        results: T[],
+        limit: number
+    ): T[] {
+        const sorted = [...results].sort((a, b) => b.score - a.score);
+        const perFileCount = new Map<string, number>();
+        const selected: T[] = [];
+
+        for (const item of sorted) {
+            if (selected.length >= limit) break;
+            const count = perFileCount.get(item.fileId) ?? 0;
+            if (count >= this.maxChunksPerFile) continue;
+            perFileCount.set(item.fileId, count + 1);
+            selected.push(item);
+        }
+        return selected;
+    }
 
     async answerQuestion(
         query: RAGQuery,
@@ -101,6 +136,8 @@ export class RAGService {
                 tenantId: searchTenantId,
                 userId,
                 query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
                 queryMode,
                 totalChunksRetrieved: 0,
                 totalTimeMs,
@@ -129,6 +166,8 @@ export class RAGService {
                 tenantId: searchTenantId,
                 userId,
                 query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
                 queryMode,
                 totalChunksRetrieved: 0,
                 totalTimeMs,
@@ -141,9 +180,36 @@ export class RAGService {
             };
         }
 
-        const maxChunkLength = 500;
-        const contextChunks = validSearchResults
-            .slice(0, effectiveTopK)
+        const selectedResults = this.selectTopResults(validSearchResults, effectiveTopK);
+        const selectedScores = selectedResults.map(r => r.score);
+        const topScore = selectedScores.length ? Math.max(...selectedScores) : 0;
+        const avgScore = selectedScores.length
+            ? selectedScores.reduce((a, b) => a + b, 0) / selectedScores.length
+            : 0;
+        this.logger.debug(`RAG retrieval stats (non-streaming): top=${topScore.toFixed(4)} avg=${avgScore.toFixed(4)} count=${selectedResults.length}`);
+
+        if (this.isBelowRelevanceThreshold(selectedResults, queryMode)) {
+            const totalTimeMs = Date.now() - startTime;
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
+                queryMode,
+                totalChunksRetrieved: selectedResults.length,
+                totalTimeMs,
+                documentsUsed: [],
+            });
+            return {
+                answer: "I couldn't find any relevant information in the documents to answer your question.",
+                sources: [],
+                model: 'none',
+            };
+        }
+
+        const maxChunkLength = 400;
+        const contextChunks = selectedResults
             .map(result => {
                 const content = result.content;
                 return content.length > maxChunkLength
@@ -152,7 +218,7 @@ export class RAGService {
             })
             .filter(Boolean);
 
-        const sources = validSearchResults.map(result => {
+        const sources = selectedResults.map(result => {
             const file = fileMap.get(result.fileId)!;
             return {
                 fileId: result.fileId,
@@ -168,7 +234,7 @@ export class RAGService {
         const llmResponse = await this.llmService.generateAnswer(question, contextChunks);
 
         const totalTimeMs = Date.now() - startTime;
-        const topScores = validSearchResults.slice(0, effectiveTopK).map(r => r.score);
+        const topScores = selectedResults.map(r => r.score);
         const rerankScore = topScores.length
             ? topScores.reduce((a, b) => a + b, 0) / topScores.length
             : null;
@@ -184,9 +250,11 @@ export class RAGService {
             tenantId: searchTenantId,
             userId,
             query: question,
+            response: llmResponse.answer,
+            aborted: false,
             queryMode,
             confidence: llmResponse.confidence ?? null,
-            totalChunksRetrieved: validSearchResults.length,
+            totalChunksRetrieved: selectedResults.length,
             rerankScore,
             totalTimeMs,
             documentsUsed,
@@ -262,6 +330,8 @@ export class RAGService {
                 tenantId: searchTenantId,
                 userId,
                 query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
                 queryMode,
                 totalChunksRetrieved: 0,
                 totalTimeMs,
@@ -289,6 +359,8 @@ export class RAGService {
                 tenantId: searchTenantId,
                 userId,
                 query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
                 queryMode,
                 totalChunksRetrieved: 0,
                 totalTimeMs,
@@ -299,9 +371,28 @@ export class RAGService {
             return;
         }
 
-        const maxChunkLength = 500;
-        const contextChunks = validSearchResults
-            .slice(0, effectiveTopK)
+        const selectedResults = this.selectTopResults(validSearchResults, effectiveTopK);
+
+        if (this.isBelowRelevanceThreshold(selectedResults, queryMode)) {
+            const totalTimeMs = Date.now() - startTime;
+            this.queryHistoryService.logQuery({
+                tenantId: searchTenantId,
+                userId,
+                query: question,
+                response: "I couldn't find any relevant information in the documents to answer your question.",
+                aborted: false,
+                queryMode,
+                totalChunksRetrieved: selectedResults.length,
+                totalTimeMs,
+                documentsUsed: [],
+            });
+            yield { type: 'token', token: "I couldn't find any relevant information in the documents to answer your question." };
+            yield { type: 'done', metadata: { model: 'none' } };
+            return;
+        }
+
+        const maxChunkLength = 400;
+        const contextChunks = selectedResults
             .map(result => {
                 const content = result.content;
                 return content.length > maxChunkLength
@@ -310,7 +401,7 @@ export class RAGService {
             })
             .filter(Boolean);
 
-        const sources = validSearchResults.map(result => {
+        const sources = selectedResults.map(result => {
             const file = fileMap.get(result.fileId)!;
             return {
                 fileId: result.fileId,
@@ -325,50 +416,84 @@ export class RAGService {
         // Send sources first
         yield { type: 'sources', sources };
 
-        // Stream LLM tokens
-        let finalResponse: LLMResponse | null = null;
-        for await (const chunk of this.llmService.streamAnswer(question, contextChunks)) {
-            if (chunk.type === 'token') {
-                yield { type: 'token', token: chunk.token };
-            } else if (chunk.type === 'done') {
-                finalResponse = chunk.response;
-                yield {
-                    type: 'done',
-                    metadata: {
-                        model: chunk.response.model,
-                        usage: chunk.response.usage,
-                    },
-                };
+        let queryLogged = false;
+        try {
+            // Stream LLM tokens
+            for await (const chunk of this.llmService.streamAnswer(question, contextChunks)) {
+                if (chunk.type === 'token') {
+                    yield { type: 'token', token: chunk.token };
+                } else if (chunk.type === 'done') {
+                    const finalResponse = chunk.response;
+                    const totalTimeMs = Date.now() - startTime;
+                    const topScores = selectedResults.map(r => r.score);
+                    const rerankScore = topScores.length
+                        ? topScores.reduce((a, b) => a + b, 0) / topScores.length
+                        : null;
+                    const documentsUsed = sources.map(s => ({
+                        fileId: s.fileId,
+                        fileName: s.fileName,
+                        pageNumber: s.pageNumber,
+                        chunkIndex: s.chunkIndex,
+                        score: s.score,
+                    }));
+
+                    // Log query history before yielding "done" so controller doesn't cancel it
+                    this.queryHistoryService.logQuery({
+                        tenantId: searchTenantId,
+                        userId,
+                        query: question,
+                        response: finalResponse.answer,
+                        aborted: false,
+                        queryMode,
+                        confidence: finalResponse.confidence ?? null,
+                        totalChunksRetrieved: selectedResults.length,
+                        rerankScore,
+                        totalTimeMs,
+                        documentsUsed,
+                        citations: null,
+                    });
+                    queryLogged = true;
+
+                    yield {
+                        type: 'done',
+                        metadata: {
+                            model: finalResponse.model,
+                            usage: finalResponse.usage,
+                        },
+                    };
+                }
             }
-        }
+        } finally {
+            if (!queryLogged) {
+                const totalTimeMs = Date.now() - startTime;
+                const topScores = selectedResults.map(r => r.score);
+                const rerankScore = topScores.length
+                    ? topScores.reduce((a, b) => a + b, 0) / topScores.length
+                    : null;
+                const documentsUsed = sources.map(s => ({
+                    fileId: s.fileId,
+                    fileName: s.fileName,
+                    pageNumber: s.pageNumber,
+                    chunkIndex: s.chunkIndex,
+                    score: s.score,
+                }));
 
-        // Log query history after streaming completes (fire-and-forget)
-        if (finalResponse) {
-            const totalTimeMs = Date.now() - startTime;
-            const topScores = validSearchResults.slice(0, effectiveTopK).map(r => r.score);
-            const rerankScore = topScores.length
-                ? topScores.reduce((a, b) => a + b, 0) / topScores.length
-                : null;
-            const documentsUsed = sources.map(s => ({
-                fileId: s.fileId,
-                fileName: s.fileName,
-                pageNumber: s.pageNumber,
-                chunkIndex: s.chunkIndex,
-                score: s.score,
-            }));
-
-            this.queryHistoryService.logQuery({
-                tenantId: searchTenantId,
-                userId,
-                query: question,
-                queryMode,
-                confidence: finalResponse.confidence ?? null,
-                totalChunksRetrieved: validSearchResults.length,
-                rerankScore,
-                totalTimeMs,
-                documentsUsed,
-                citations: null,
-            });
+                // Log partial query on abort/disconnect
+                this.queryHistoryService.logQuery({
+                    tenantId: searchTenantId,
+                    userId,
+                    query: question,
+                    response: null,
+                    aborted: true,
+                    queryMode,
+                    confidence: null,
+                    totalChunksRetrieved: selectedResults.length,
+                    rerankScore,
+                    totalTimeMs,
+                    documentsUsed,
+                    citations: null,
+                });
+            }
         }
     }
 
@@ -404,7 +529,7 @@ export class RAGService {
                             field: 'embedding',
                             query_vector: queryEmbedding,
                             k: topK,
-                            num_candidates: Math.min(topK * 5, 50), // Reduced for speed
+                            num_candidates: Math.min(topK * 10, 100), // Higher recall for better semantic hits
                             filter: {
                                 bool: {
                                     filter: [
@@ -426,18 +551,28 @@ export class RAGService {
                         index: 'doc_pages',
                         query: {
                             bool: {
-                                must: [
+                                should: [
+                                    {
+                                        match_phrase: {
+                                            content: {
+                                                query,
+                                                slop: 2,
+                                                boost: 2,
+                                            }
+                                        }
+                                    },
                                     {
                                         match: {
                                             content: {
                                                 query,
-                                                operator: 'or', // Changed from 'and' to 'or' for faster, more lenient matching
+                                                operator: 'and',
                                                 fuzziness: 'AUTO',
-                                                minimum_should_match: '75%', // Still require most terms
+                                                minimum_should_match: '85%',
                                             }
                                         }
                                     }
                                 ],
+                                minimum_should_match: 1,
                                 filter: [
                                     {
                                         match: {
@@ -448,6 +583,7 @@ export class RAGService {
                             }
                         },
                         size: topK,
+                        min_score: 0.2,
                         _source: ['fileId', 'pageNumber', 'chunkIndex', 'content'],
                         // Add timeout to prevent slow queries
                         timeout: '5s',
@@ -467,17 +603,31 @@ export class RAGService {
                         const knnHits = (knnResponse as any).body?.hits?.hits || (knnResponse as any).hits?.hits || [];
                         const keywordHits = (keywordResponse as any).body?.hits?.hits || (keywordResponse as any).hits?.hits || [];
                         
-                        // Merge and deduplicate by fileId+pageNumber+chunkIndex
-                        const seen = new Set<string>();
-                        const allHits = [...knnHits, ...keywordHits];
-                        const uniqueHits = allHits.filter((hit: any) => {
+                        // Combine with reciprocal rank fusion (RRF) for better balance
+                        const rrfK = 60;
+                        const combined = new Map<string, { hit: any; score: number }>();
+
+                        knnHits.forEach((hit: any, idx: number) => {
                             const key = `${hit._source?.fileId}-${hit._source?.pageNumber}-${hit._source?.chunkIndex}`;
-                            if (seen.has(key)) return false;
-                            seen.add(key);
-                            return true;
+                            const entry = combined.get(key) ?? { hit, score: 0 };
+                            entry.score += 1 / (rrfK + idx + 1);
+                            combined.set(key, entry);
                         });
 
-                        // Sort by score and take top K
+                        keywordHits.forEach((hit: any, idx: number) => {
+                            const key = `${hit._source?.fileId}-${hit._source?.pageNumber}-${hit._source?.chunkIndex}`;
+                            const entry = combined.get(key) ?? { hit, score: 0 };
+                            entry.score += 1 / (rrfK + idx + 1);
+                            // Prefer keyword hit content if available
+                            entry.hit = entry.hit || hit;
+                            combined.set(key, entry);
+                        });
+
+                        const uniqueHits = Array.from(combined.values()).map((entry) => ({
+                            ...entry.hit,
+                            _score: entry.score,
+                        }));
+
                         uniqueHits.sort((a: any, b: any) => (b._score || 0) - (a._score || 0));
                         response = { hits: { hits: uniqueHits.slice(0, topK) } };
                     } else {
@@ -500,6 +650,7 @@ export class RAGService {
                                                 query,
                                                 operator: 'and',
                                                 fuzziness: 'AUTO',
+                                                minimum_should_match: '85%',
                                             }
                                         }
                                     }
@@ -514,6 +665,7 @@ export class RAGService {
                             }
                         },
                         size: topK,
+                        min_score: 0.2,
                         _source: ['fileId', 'pageNumber', 'chunkIndex', 'content'],
                     });
                 }
@@ -523,18 +675,28 @@ export class RAGService {
                     index: 'doc_pages',
                     query: {
                         bool: {
-                            must: [
+                            should: [
+                                {
+                                    match_phrase: {
+                                        content: {
+                                            query,
+                                            slop: 2,
+                                            boost: 2,
+                                        }
+                                    }
+                                },
                                 {
                                     match: {
                                         content: {
                                             query,
-                                            operator: 'or', // More lenient for speed
+                                            operator: 'and',
                                             fuzziness: 'AUTO',
-                                            minimum_should_match: '75%',
+                                            minimum_should_match: '85%',
                                         }
                                     }
                                 }
                             ],
+                            minimum_should_match: 1,
                             filter: [
                                 {
                                     match: {
@@ -545,13 +707,51 @@ export class RAGService {
                         }
                     },
                     size: topK,
+                    min_score: 0.2,
                     _source: ['fileId', 'pageNumber', 'chunkIndex', 'content'],
                     timeout: '5s',
                 });
             }
 
             const hits = response.body?.hits || response.hits;
-            const hitsList = hits?.hits || [];
+            let hitsList = hits?.hits || [];
+
+            // Fallback: if strict query returns nothing, try a looser keyword match
+            if (hitsList.length === 0) {
+                const fallbackResponse: any = await this.es.search({
+                    index: 'doc_pages',
+                    query: {
+                        bool: {
+                            should: [
+                                {
+                                    match: {
+                                        content: {
+                                            query,
+                                            operator: 'or',
+                                            fuzziness: 'AUTO',
+                                            minimum_should_match: '70%',
+                                        }
+                                    }
+                                }
+                            ],
+                            minimum_should_match: 1,
+                            filter: [
+                                {
+                                    match: {
+                                        tenantId: tenantId
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    size: topK,
+                    min_score: 0.1,
+                    _source: ['fileId', 'pageNumber', 'chunkIndex', 'content'],
+                    timeout: '5s',
+                });
+                const fallbackHits = fallbackResponse.body?.hits || fallbackResponse.hits;
+                hitsList = fallbackHits?.hits || [];
+            }
 
             // Filter by folderId if specified (application layer)
             let results = hitsList.map((hit: any) => ({
