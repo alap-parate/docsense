@@ -1,5 +1,4 @@
-import { useMutation } from "@tanstack/react-query"
-import { api, type ApiResponse } from "@/lib/api"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 
 interface RAGRequest {
   question: string
@@ -36,6 +35,8 @@ interface RAGResponse {
  * Note: This uses fetch directly for SSE streaming, not the standard api helper
  */
 export function useRAGAsk() {
+  const queryClient = useQueryClient()
+
   return useMutation({
     mutationFn: async (params: RAGRequest): Promise<RAGResponse> => {
       const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
@@ -100,6 +101,10 @@ export function useRAGAsk() {
       }
 
       return { sources, answer, metadata }
+    },
+    onSuccess: () => {
+      // Invalidate query history cache when RAG query completes
+      queryClient.invalidateQueries({ queryKey: ["query-history"] })
     },
   })
 }

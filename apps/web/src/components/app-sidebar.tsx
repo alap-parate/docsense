@@ -1,8 +1,9 @@
 import * as React from "react"
 import {
   FileText,
-  LayoutGrid,
+  SquaresExclude,
   LayoutDashboard,
+  LayoutGrid,
   MessageCircle,
   History,
   LineChart,
@@ -41,8 +42,8 @@ import { useWorkspaceStore } from "@/store/workspace-store"
 import { useWorkspaces, type Workspace } from "@/hooks/use-workspaces"
 
 const mainNav = [
-  { title: "Overview", url: "/app/dashboard", icon: LayoutDashboard },
-  { title: "Workspaces", url: "/app/workspaces", icon: LayoutGrid },
+  { title: "Dashboard", url: "/app/dashboard", icon:  LayoutDashboard},
+  { title: "Workspaces", url: "/app/workspaces", icon: SquaresExclude },
   { title: "Documents", url: "/app/documents", icon: FileText },
   { title: "Search", url: "/app/search", icon: Search },
   { title: "Ask AI", url: "/app/search/ask-ai", icon: MessageCircle },

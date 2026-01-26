@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
 import { api, type ApiResponse } from "@/lib/api"
 
 interface SearchMatch {
@@ -24,6 +25,7 @@ interface SearchParams {
 }
 
 export function useSearch(params: SearchParams) {
+  const queryClient = useQueryClient()
   const searchParams = new URLSearchParams()
   searchParams.append("q", params.q)
   if (params.folderId) searchParams.append("folderId", params.folderId)
@@ -31,7 +33,7 @@ export function useSearch(params: SearchParams) {
   if (params.limit) searchParams.append("limit", params.limit.toString())
   if (params.offset) searchParams.append("offset", params.offset.toString())
 
-  return useQuery({
+  const query = useQuery({
     queryKey: ["search", params],
     queryFn: async (): Promise<SearchResponse> => {
       const response = await api<any>(`/api/v1/search?${searchParams.toString()}`, {
@@ -56,4 +58,13 @@ export function useSearch(params: SearchParams) {
     },
     enabled: !!params.q && params.q.length > 0,
   })
+
+  // Invalidate query history cache when search completes successfully
+  useEffect(() => {
+    if (query.isSuccess && query.data) {
+      queryClient.invalidateQueries({ queryKey: ["query-history"] })
+    }
+  }, [query.isSuccess, query.data, queryClient])
+
+  return query
 }
